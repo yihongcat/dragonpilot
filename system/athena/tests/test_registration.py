@@ -3,7 +3,9 @@ from Crypto.PublicKey import RSA
 from pathlib import Path
 
 from openpilot.common.params import Params
+from openpilot.selfdrive.selfdrived.alertmanager import set_offroad_alert
 from openpilot.system.athena.registration import register, UNREGISTERED_DONGLE_ID
+from openpilot.system.hardware.capabilities import DRIVER_CAMERA_PRESENT_PARAM
 from openpilot.system.athena.tests.helpers import MockResponse
 from openpilot.system.hardware.hw import Paths
 
@@ -74,3 +76,24 @@ class TestRegistration:
     assert m.call_count == 1
     assert dongle == UNREGISTERED_DONGLE_ID
     assert self.params.get("DongleId") == dongle
+
+  def test_lite_unregistered_clears_comma_backend_alert(self, mocker):
+    self._generate_keys()
+    self.params.remove("DongleId")
+    self.dongle_id.unlink(missing_ok=True)
+    mocker.patch("openpilot.system.athena.registration.LITE", True)
+    set_offroad_alert("Offroad_UnregisteredHardware", True)
+
+    assert register() == UNREGISTERED_DONGLE_ID
+    assert self.params.get("Offroad_UnregisteredHardware") is None
+
+  def test_no_driver_camera_clears_comma_backend_alert(self, mocker):
+    self._generate_keys()
+    self.params.remove("DongleId")
+    self.dongle_id.unlink(missing_ok=True)
+    self.params.put_bool(DRIVER_CAMERA_PRESENT_PARAM, False)
+    m = mocker.patch("openpilot.system.athena.registration.api_get", autospec=True)
+    m.return_value = MockResponse(None, 402)
+
+    assert register() == UNREGISTERED_DONGLE_ID
+    assert self.params.get("Offroad_UnregisteredHardware") is None

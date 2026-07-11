@@ -1,19 +1,52 @@
 import os
 import operator
 import platform
+import time
 
 from cereal import car
 from openpilot.common.params import Params
 from openpilot.system.hardware import PC, TICI
+from openpilot.system.hardware.capabilities import DRIVER_CAMERA_PROBE_TIME, driver_camera_present, set_driver_camera_present
 from openpilot.system.manager.process import PythonProcess, NativeProcess, DaemonProcess
+from msgq.visionipc import VisionIpcClient
 
 WEBCAM = os.getenv("USE_WEBCAM") is not None
 LITE = os.getenv("LITE") is not None
 
 TICI_DOS = "TICI_DOS" in os.environ
+driver_camera_missing_since: float | None = None
 
 def driverview(started: bool, params: Params, CP: car.CarParams) -> bool:
   return started or params.get_bool("IsDriverViewEnabled")
+
+def driver_monitoring(started: bool, params: Params, CP: car.CarParams) -> bool:
+  global driver_camera_missing_since
+
+  if not driverview(started, params, CP):
+    driver_camera_missing_since = None
+    return False
+  if os.getenv("DISABLE_DRIVER") is not None:
+    driver_camera_missing_since = None
+    return False
+  if WEBCAM and not os.getenv("DRIVER_CAM"):
+    driver_camera_missing_since = None
+    return False
+
+  available_streams = VisionIpcClient.available_streams("camerad", block=False)
+  present = driver_camera_present(available_streams)
+  if present is True:
+    driver_camera_missing_since = None
+    set_driver_camera_present(params, True)
+    return True
+  if present is None:
+    driver_camera_missing_since = None
+    return False
+
+  if driver_camera_missing_since is None:
+    driver_camera_missing_since = time.monotonic()
+  elif time.monotonic() - driver_camera_missing_since >= DRIVER_CAMERA_PROBE_TIME:
+    set_driver_camera_present(params, False)
+  return False
 
 def notcar(started: bool, params: Params, CP: car.CarParams) -> bool:
   return started and CP.notCar
@@ -95,7 +128,7 @@ procs = [
   PythonProcess("timed", "system.timed", always_run, enabled=not PC),
 
   PythonProcess("modeld", "selfdrive.modeld.modeld", only_onroad),
-  PythonProcess("dmonitoringmodeld", "selfdrive.modeld.dmonitoringmodeld", driverview, enabled=(WEBCAM or not PC) and not LITE),
+  PythonProcess("dmonitoringmodeld", "selfdrive.modeld.dmonitoringmodeld", driver_monitoring, enabled=(WEBCAM or not PC) and not LITE),
 
   PythonProcess("sensord", "system.sensord.sensord", only_onroad, enabled=not PC),
   PythonProcess("ui", "selfdrive.ui.ui", always_run, restart_if_crash=True),
@@ -110,7 +143,7 @@ procs = [
   PythonProcess("selfdrived", "selfdrive.selfdrived.selfdrived", only_onroad),
   PythonProcess("card", "selfdrive.car.card", only_onroad),
   PythonProcess("deleter", "system.loggerd.deleter", always_run),
-  PythonProcess("dmonitoringd", "selfdrive.monitoring.dmonitoringd", driverview, enabled=(WEBCAM or not PC) and not LITE),
+  PythonProcess("dmonitoringd", "selfdrive.monitoring.dmonitoringd", driver_monitoring, enabled=(WEBCAM or not PC) and not LITE),
   PythonProcess("qcomgpsd", "system.qcomgpsd.qcomgpsd", qcomgps, enabled=TICI),
   PythonProcess("pandad", "selfdrive.pandad.pandad" if not TICI_DOS else "selfdrive.pandad_tici.pandad", always_run),
   PythonProcess("paramsd", "selfdrive.locationd.paramsd", only_onroad),

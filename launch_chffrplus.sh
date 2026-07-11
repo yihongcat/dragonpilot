@@ -1,8 +1,38 @@
 #!/usr/bin/env bash
 
 DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" >/dev/null && pwd )"
+BUILD_STAMP="/data/.openpilot_build_state"
 
 source "$DIR/launch_env.sh"
+
+build_fingerprint() {
+  {
+    printf 'repo=%s\n' "$DIR"
+    git -C "$DIR" rev-parse HEAD
+    git -C "$DIR" status --porcelain=v1 --untracked-files=all --ignore-submodules=none
+    git -C "$DIR" submodule status --recursive
+    printf 'AGNOS=%s\nTICI_DOS=%s\nLITE=%s\nPANDA_DEBUG_BUILD=%s\n' \
+      "$([ -f /AGNOS ] && echo 1 || echo 0)" "${TICI_DOS:-}" "${LITE:-}" "${PANDA_DEBUG_BUILD:-}"
+  } | sha256sum | awk '{print $1}'
+}
+
+build_if_needed() {
+  [ -f "$DIR/prebuilt" ] && return
+
+  local fingerprint
+  fingerprint="$(build_fingerprint)"
+  if [ -f "$BUILD_STAMP" ] && [ "$(cat "$BUILD_STAMP")" = "$fingerprint" ]; then
+    echo "Build inputs unchanged, skipping local build"
+    return
+  fi
+
+  ./build.py
+  if [ $? -eq 0 ]; then
+    build_fingerprint > "$BUILD_STAMP"
+  else
+    rm -f "$BUILD_STAMP"
+  fi
+}
 
 function agnos_init {
   # TODO: move this to agnos
@@ -238,9 +268,7 @@ function launch {
 
   # start manager
   cd system/manager
-  if [ ! -f $DIR/prebuilt ]; then
-    ./build.py
-  fi
+  build_if_needed
   ./manager.py
 
   # if broken, keep on screen error

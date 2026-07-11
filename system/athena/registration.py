@@ -11,6 +11,7 @@ from openpilot.common.params import Params
 from openpilot.common.spinner import Spinner
 from openpilot.selfdrive.selfdrived.alertmanager import set_offroad_alert
 from openpilot.system.hardware import HARDWARE, PC
+from openpilot.system.hardware.capabilities import DRIVER_CAMERA_PRESENT_PARAM
 from openpilot.system.hardware.hw import Paths
 from openpilot.common.swaglog import cloudlog
 import os
@@ -56,6 +57,7 @@ def register(show_spinner=False) -> str | None:
 
     if LITE:
       params.put("DongleId", UNREGISTERED_DONGLE_ID)
+      set_offroad_alert("Offroad_UnregisteredHardware", False)
       return UNREGISTERED_DONGLE_ID
 
     # Block until we get the imei
@@ -110,7 +112,8 @@ def register(show_spinner=False) -> str | None:
 
   if dongle_id:
     params.put("DongleId", dongle_id, block=True)
-    set_offroad_alert("Offroad_UnregisteredHardware", (dongle_id == UNREGISTERED_DONGLE_ID) and not PC and not os.getenv("LITE"))
+    no_driver_camera = params.get(DRIVER_CAMERA_PRESENT_PARAM) is False
+    set_offroad_alert("Offroad_UnregisteredHardware", (dongle_id == UNREGISTERED_DONGLE_ID) and not PC and not LITE and not no_driver_camera)
   return dongle_id
 
 

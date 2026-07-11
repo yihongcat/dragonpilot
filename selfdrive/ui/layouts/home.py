@@ -12,6 +12,7 @@ from openpilot.system.ui.lib.application import gui_app, FontWeight, MousePos
 from openpilot.system.ui.lib.multilang import tr, trn
 from openpilot.system.ui.widgets.label import gui_label
 from openpilot.system.ui.widgets import Widget
+from openpilot.selfdrive.ui.version_text import current_version_description
 import os
 
 HEADER_HEIGHT = 80
@@ -239,5 +240,5 @@ class HomeLayout(Widget):
         device_type = " - Lite"
     else:
       device_type = ""
-    description = self.params.get("UpdaterCurrentDescription")
+    description = current_version_description(self.params)
     return f"{brand}{device_type} {description}" if description else f"{brand}{device_type}"
