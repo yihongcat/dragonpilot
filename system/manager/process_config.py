@@ -15,12 +15,13 @@ LITE = os.getenv("LITE") is not None
 
 TICI_DOS = "TICI_DOS" in os.environ
 driver_camera_missing_since: float | None = None
+driver_camera_probe_result: bool | None = None
 
 def driverview(started: bool, params: Params, CP: car.CarParams) -> bool:
   return started or params.get_bool("IsDriverViewEnabled")
 
 def driver_monitoring(started: bool, params: Params, CP: car.CarParams) -> bool:
-  global driver_camera_missing_since
+  global driver_camera_missing_since, driver_camera_probe_result
 
   if not driverview(started, params, CP):
     driver_camera_missing_since = None
@@ -31,12 +32,15 @@ def driver_monitoring(started: bool, params: Params, CP: car.CarParams) -> bool:
   if WEBCAM and not os.getenv("DRIVER_CAM"):
     driver_camera_missing_since = None
     return False
+  if driver_camera_probe_result is not None:
+    return driver_camera_probe_result
 
   available_streams = VisionIpcClient.available_streams("camerad", block=False)
   present = driver_camera_present(available_streams)
   if present is True:
     driver_camera_missing_since = None
     set_driver_camera_present(params, True)
+    driver_camera_probe_result = True
     return True
   if present is None:
     driver_camera_missing_since = None
@@ -46,6 +50,7 @@ def driver_monitoring(started: bool, params: Params, CP: car.CarParams) -> bool:
     driver_camera_missing_since = time.monotonic()
   elif time.monotonic() - driver_camera_missing_since >= DRIVER_CAMERA_PROBE_TIME:
     set_driver_camera_present(params, False)
+    driver_camera_probe_result = False
   return False
 
 def notcar(started: bool, params: Params, CP: car.CarParams) -> bool:
