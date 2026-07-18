@@ -9,7 +9,7 @@ from openpilot.common.filter_simple import FirstOrderFilter
 from openpilot.common.realtime import DT_MDL
 from openpilot.selfdrive.modeld.constants import ModelConstants
 from openpilot.selfdrive.controls.lib.longcontrol import LongCtrlState
-from openpilot.selfdrive.controls.lib.longitudinal_mpc_lib.long_mpc import LongitudinalMpc, LongitudinalPlanSource
+from openpilot.selfdrive.controls.lib.longitudinal_mpc_lib.long_mpc import LongitudinalMpc, LongitudinalPlanSource, STOP_DISTANCE
 from openpilot.selfdrive.controls.lib.longitudinal_mpc_lib.long_mpc import T_IDXS as T_IDXS_MPC
 from openpilot.selfdrive.controls.lib.drive_helpers import CONTROL_N, get_accel_from_plan
 from openpilot.selfdrive.car.cruise import V_CRUISE_MAX, V_CRUISE_UNSET
@@ -17,6 +17,7 @@ from openpilot.common.swaglog import cloudlog
 from dragonpilot.selfdrive.controls.lib.acm import ACM
 from dragonpilot.selfdrive.controls.lib.aem import AEM
 from dragonpilot.selfdrive.controls.lib.apm import APM
+from dragonpilot.selfdrive.controls.lib.curve_speed_limiter import CurveSpeedLimiter
 
 A_CRUISE_MAX_VALS = [1.6, 1.2, 0.8, 0.6]
 A_CRUISE_MAX_BP = [0., 10.0, 25., 40.]
@@ -75,6 +76,7 @@ class LongitudinalPlanner:
     self.acm = ACM()
     self.aem = AEM()
     self.apm = APM()
+    self.curve_speed_limiter = CurveSpeedLimiter(CP.maxLateralAccel)
 
   @staticmethod
   def parse_model(model_msg):
@@ -96,7 +98,7 @@ class LongitudinalPlanner:
       throttle_prob = 1.0
     return x, v, a, j, throttle_prob
 
-  def update(self, sm, dp_flags = 0):
+  def update(self, sm, dp_flags=0, dp_curve_speed_reduction=0, dp_stop_distance=STOP_DISTANCE):
     if len(sm['carControl'].orientationNED) == 3:
       accel_coast = get_coast_accel(sm['carControl'].orientationNED[1])
     else:
@@ -145,9 +147,21 @@ class LongitudinalPlanner:
     if dp_flags & DPFlags.APM:
       personality = self.apm.get_personality(v_ego, personality)
 
+    mode = 'blended' if sm['selfdriveState'].experimentalMode else 'acc'
+    if dp_flags & DPFlags.AEM:
+      self.aem.update_states(model_msg=sm['modelV2'], radar_msg=sm['radarState'], v_ego=v_ego)
+      mode = self.aem.get_mode(mode)
+
+    curve_speed = self.curve_speed_limiter.update(
+      sm['modelV2'], sm['controlsState'].curvature, v_ego,
+      dp_curve_speed_reduction, mode == 'blended' and not reset_state,
+      sm['carControl'].cruiseControl.override,
+    )
+    v_cruise = min(v_cruise, curve_speed)
+
     self.mpc.set_weights(prev_accel_constraint, personality=personality)
     self.mpc.set_cur_state(self.v_desired_filter.x, self.a_desired)
-    self.mpc.update(sm['radarState'], v_cruise, personality=personality)
+    self.mpc.update(sm['radarState'], v_cruise, personality=personality, stop_distance=dp_stop_distance)
 
     self.v_desired_trajectory = np.interp(CONTROL_N_T_IDX, T_IDXS_MPC, self.mpc.v_solution)
     self.a_desired_trajectory = np.interp(CONTROL_N_T_IDX, T_IDXS_MPC, self.mpc.a_solution)
@@ -173,11 +187,6 @@ class LongitudinalPlanner:
                                                                         action_t=action_t, vEgoStopping=self.CP.vEgoStopping)
     output_a_target_e2e = sm['modelV2'].action.desiredAcceleration
     output_should_stop_e2e = sm['modelV2'].action.shouldStop
-
-    mode = 'blended' if sm['selfdriveState'].experimentalMode else 'acc'
-    if dp_flags & DPFlags.AEM:
-      self.aem.update_states(model_msg=sm['modelV2'], radar_msg=sm['radarState'], v_ego=sm['carState'].vEgo)
-      mode = self.aem.get_mode(mode)
 
     if mode == 'blended':
       output_a_target = min(output_a_target_e2e, output_a_target_mpc)

@@ -69,6 +69,7 @@ class SelfdriveD:
     self.excessive_actuation_check = ExcessiveActuationCheck()
     self.excessive_actuation = self.params.get("Offroad_ExcessiveActuation") is not None
     self.driver_camera_missing_since: float | None = None
+    self.driver_camera_probe_complete = False
 
     # Setup sockets
     self.pm = messaging.PubMaster(['selfdriveState', 'onroadEvents'])
@@ -165,6 +166,9 @@ class SelfdriveD:
       self.sm.ignore_valid.remove(service)
 
   def _update_driver_camera_checks(self) -> None:
+    if self.driver_camera_probe_complete:
+      return
+
     available_streams = VisionIpcClient.available_streams("camerad", block=False)
     present = driver_camera_present(available_streams)
     if present is True:
@@ -172,6 +176,7 @@ class SelfdriveD:
       set_driver_camera_present(self.params, True)
       self._restore_sock_checks('driverCameraState')
       self._restore_sock_checks('driverMonitoringState')
+      self.driver_camera_probe_complete = True
       return
     if present is None:
       self.driver_camera_missing_since = None
@@ -185,6 +190,7 @@ class SelfdriveD:
       self._ignore_sock_checks('driverCameraState')
       self._ignore_sock_checks('driverMonitoringState')
       set_offroad_alert("Offroad_UnregisteredHardware", False)
+      self.driver_camera_probe_complete = True
 
   def update_events(self, CS):
     """Compute onroadEvents from carState"""

@@ -23,6 +23,8 @@ def main():
                            poll='modelV2')
 
   dp_flags = 0
+  dp_curve_speed_reduction = int(params.get("dp_lon_curve_speed_reduction") or 0)
+  dp_stop_distance = int(params.get("dp_lon_stop_distance") or 6)
 
   if params.get_bool("dp_lon_acm"):
     dp_flags |= DPFlags.ACM
@@ -34,7 +36,10 @@ def main():
   while True:
     sm.update()
     if sm.updated['modelV2']:
-      longitudinal_planner.update(sm, dp_flags)
+      if sm.frame % 20 == 0:
+        dp_curve_speed_reduction = int(params.get("dp_lon_curve_speed_reduction") or 0)
+        dp_stop_distance = int(params.get("dp_lon_stop_distance") or 6)
+      longitudinal_planner.update(sm, dp_flags, dp_curve_speed_reduction, dp_stop_distance)
       longitudinal_planner.publish(sm, pm)
 
       ldw.update(sm.frame, sm['modelV2'], sm['carState'], sm['carControl'])
