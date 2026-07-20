@@ -1,4 +1,5 @@
 import math
+from dataclasses import dataclass
 
 import numpy as np
 
@@ -7,96 +8,142 @@ from openpilot.common.realtime import DT_MDL
 
 
 MIN_CURVE_SPEED = 20.0 * CV.KPH_TO_MS
-NO_OVERSHOOT_TIME_HORIZON = 4.0
-MAX_BOUNDARY_DECEL = 0.8  # m/s^2, limits how quickly the curve speed boundary can fall
+NORMAL_CURVE_DECEL = 1.0  # m/s^2, used to decide when to begin slowing on the straight
+MAX_CURVE_DECEL = 1.5  # m/s^2, fallback when the model detects a curve late
+MIN_MODEL_SPEED = 1.0  # m/s, avoids unstable curvature estimates near a predicted stop
+MIN_CURVATURE = 1e-4
+MAX_STRENGTH_LAT_ACCEL_FACTOR = 0.6
+DEFAULT_MAX_LATERAL_ACCEL = 1.5
 
-ENTERING_PRED_LAT_ACCEL = 1.3
-ABORT_PRED_LAT_ACCEL = 1.1
-TURNING_LAT_ACCEL = 1.6
-LEAVING_LAT_ACCEL = 1.3
-FINISH_LAT_ACCEL = 1.1
+CURVATURE_FILTER_SIZE = 3
+RELEASE_HOLD_FRAMES = round(0.5 / DT_MDL)
+RELEASE_ACCEL = 0.5  # m/s^2, limits how quickly the speed boundary rises after a turn
+
+
+@dataclass(frozen=True)
+class CurveSpeedLimit:
+  speed: float = math.inf
+  required_decel: float = 0.0
+  active: bool = False
 
 
 class CurveSpeedLimiter:
-  """Vision-based curve speed boundary inspired by sunnypilot V-TSC."""
+  """Distance-aware vision curve speed boundary for blended longitudinal control."""
 
-  def __init__(self, max_lateral_accel: float):
-    self.max_lateral_accel = max_lateral_accel
-    self.state = "disabled"
-    self.current_lateral_accel = 0.0
-    self.max_predicted_lateral_accel = 0.0
-    self.target_speed = math.inf
+  def __init__(self, max_lateral_accel: float, longitudinal_actuator_delay: float = 0.0):
+    self.max_lateral_accel = (float(max_lateral_accel)
+                              if math.isfinite(max_lateral_accel) and max_lateral_accel > 0.0
+                              else DEFAULT_MAX_LATERAL_ACCEL)
+    self.longitudinal_actuator_delay = max(0.0, float(longitudinal_actuator_delay))
+    self.allowed_lateral_accel = self.max_lateral_accel
+    self.target_curve_speed = math.inf
+    self.target_distance = math.inf
     self.output_speed = math.inf
+    self.required_decel = 0.0
+    self.release_frames = 0
 
   def _allowed_lateral_accel(self, strength: int) -> float:
-    # maxLateralAccel varies significantly by platform. Clamp it before using it
-    # as the vehicle-specific anchor so weak steering platforms remain usable.
-    vehicle_cap = float(np.clip(self.max_lateral_accel, 1.0, 3.0))
-    relaxed = min(3.0, max(2.0, vehicle_cap * 1.25))
-    restrictive = max(0.8, min(1.5, vehicle_cap * 0.6))
-    return float(np.interp(strength, [1, 100], [relaxed, restrictive]))
+    factor = float(np.interp(strength, [1, 100], [1.0, MAX_STRENGTH_LAT_ACCEL_FACTOR]))
+    return self.max_lateral_accel * factor
 
-  def _reset(self):
-    self.state = "disabled"
-    self.current_lateral_accel = 0.0
-    self.max_predicted_lateral_accel = 0.0
-    self.target_speed = math.inf
+  @staticmethod
+  def _filtered_curvatures(rate_plan: np.ndarray, velocity_plan: np.ndarray) -> np.ndarray:
+    curvatures = np.zeros_like(rate_plan)
+    valid_speed = velocity_plan >= MIN_MODEL_SPEED
+    curvatures[valid_speed] = np.abs(rate_plan[valid_speed]) / velocity_plan[valid_speed]
+
+    # A centered median rejects an isolated model spike while preserving a curve
+    # represented by two or more adjacent trajectory points, including at the ends.
+    padding = CURVATURE_FILTER_SIZE // 2
+    padded = np.pad(curvatures, (padding, padding), mode="constant")
+    return np.array([np.median(padded[i:i + CURVATURE_FILTER_SIZE]) for i in range(len(curvatures))])
+
+  @staticmethod
+  def _distances(position_x: np.ndarray, position_y: np.ndarray) -> np.ndarray:
+    segment_distances = np.hypot(np.diff(position_x), np.diff(position_y))
+    return np.concatenate(([0.0], np.cumsum(segment_distances)))
+
+  def _reset(self) -> CurveSpeedLimit:
+    self.allowed_lateral_accel = self.max_lateral_accel
+    self.target_curve_speed = math.inf
+    self.target_distance = math.inf
     self.output_speed = math.inf
+    self.required_decel = 0.0
+    self.release_frames = 0
+    return CurveSpeedLimit()
 
-  def _smooth_target(self, raw_target: float, v_ego: float) -> float:
-    previous = v_ego if not math.isfinite(self.output_speed) else self.output_speed
-    self.output_speed = max(raw_target, previous - MAX_BOUNDARY_DECEL * DT_MDL)
-    return self.output_speed
+  def _release(self, v_ego: float, v_cruise: float) -> CurveSpeedLimit:
+    self.target_curve_speed = math.inf
+    self.target_distance = math.inf
+    self.required_decel = 0.0
+    if not math.isfinite(self.output_speed):
+      return CurveSpeedLimit()
 
-  def update(self, model, current_curvature: float, v_ego: float,
-             strength: int, enabled: bool, overriding: bool) -> float:
+    self.release_frames += 1
+    self.output_speed = max(self.output_speed, min(v_ego, v_cruise))
+    if self.release_frames > RELEASE_HOLD_FRAMES:
+      self.output_speed = min(v_cruise, self.output_speed + RELEASE_ACCEL * DT_MDL)
+
+    if self.output_speed >= v_cruise - 0.1:
+      return self._reset()
+    return CurveSpeedLimit(self.output_speed, active=True)
+
+  def update(self, model, v_ego: float, v_cruise: float,
+             strength: int, enabled: bool, overriding: bool) -> CurveSpeedLimit:
     strength = int(np.clip(strength, 0, 100))
+    if not enabled or strength == 0 or overriding:
+      return self._reset()
+
     rate_plan = np.asarray(model.orientationRate.z, dtype=float)
     velocity_plan = np.asarray(model.velocity.x, dtype=float)
+    position_x = np.asarray(model.position.x, dtype=float)
+    position_y = np.asarray(model.position.y, dtype=float)
 
-    valid_plan = len(rate_plan) > 1 and len(rate_plan) == len(velocity_plan)
-    if not enabled or strength == 0 or overriding or not valid_plan:
-      self._reset()
-      return math.inf
+    plan_length = len(rate_plan)
+    valid_plan = (plan_length > 1 and len(velocity_plan) == plan_length and
+                  len(position_x) == plan_length and len(position_y) == plan_length and
+                  np.all(np.isfinite(rate_plan)) and np.all(np.isfinite(velocity_plan)) and
+                  np.all(np.isfinite(position_x)) and np.all(np.isfinite(position_y)))
+    if not valid_plan or v_ego <= MIN_CURVE_SPEED or v_cruise <= MIN_CURVE_SPEED:
+      return self._reset()
 
-    self.current_lateral_accel = abs(current_curvature) * v_ego ** 2
-    predicted_lateral_accels = np.abs(rate_plan) * np.maximum(velocity_plan, 0.0)
-    self.max_predicted_lateral_accel = float(np.percentile(predicted_lateral_accels, 97))
+    curvatures = self._filtered_curvatures(rate_plan, velocity_plan)
+    distances = self._distances(position_x, position_y)
+    effective_distances = np.maximum(0.0, distances - v_ego * (self.longitudinal_actuator_delay + DT_MDL))
 
-    if self.state == "disabled":
-      self.state = "enabled"
-    elif self.state == "enabled" and v_ego > MIN_CURVE_SPEED and self.max_predicted_lateral_accel >= ENTERING_PRED_LAT_ACCEL:
-      self.state = "entering"
-    elif self.state == "entering":
-      if self.current_lateral_accel >= TURNING_LAT_ACCEL:
-        self.state = "turning"
-      elif self.max_predicted_lateral_accel < ABORT_PRED_LAT_ACCEL:
-        self.state = "enabled"
-    elif self.state == "turning" and self.current_lateral_accel <= LEAVING_LAT_ACCEL:
-      self.state = "leaving"
-    elif self.state == "leaving":
-      if self.current_lateral_accel >= TURNING_LAT_ACCEL:
-        self.state = "turning"
-      elif self.current_lateral_accel < FINISH_LAT_ACCEL and self.max_predicted_lateral_accel < ABORT_PRED_LAT_ACCEL:
-        self.state = "enabled"
+    self.allowed_lateral_accel = self._allowed_lateral_accel(strength)
+    curve_speeds = np.full(plan_length, math.inf)
+    curve_points = curvatures >= MIN_CURVATURE
+    curve_speeds[curve_points] = np.maximum(
+      MIN_CURVE_SPEED,
+      np.sqrt(self.allowed_lateral_accel / curvatures[curve_points]),
+    )
+    speed_boundaries = np.sqrt(curve_speeds ** 2 + 2.0 * NORMAL_CURVE_DECEL * effective_distances)
+    target_idx = int(np.argmin(speed_boundaries))
+    raw_target = float(speed_boundaries[target_idx])
 
-    if self.state not in ("entering", "turning", "leaving"):
-      self.target_speed = math.inf
-      self.output_speed = math.inf
-      return self.target_speed
+    if not math.isfinite(raw_target) or raw_target >= v_cruise:
+      return self._release(v_ego, v_cruise)
 
-    v_safe = max(v_ego, 0.1)
-    max_predicted_curvature = self.max_predicted_lateral_accel / v_safe ** 2
-    allowed_lateral_accel = self._allowed_lateral_accel(strength)
-    curve_speed = math.sqrt(allowed_lateral_accel / max(max_predicted_curvature, 1e-4))
+    self.release_frames = 0
+    self.target_curve_speed = float(curve_speeds[target_idx])
+    self.target_distance = float(effective_distances[target_idx])
 
-    if self.state == "entering":
-      boundary_accel = float(np.interp(self.max_predicted_lateral_accel, [1.3, 3.0], [-0.2, -1.0]))
-    elif self.state == "turning":
-      boundary_accel = float(np.interp(self.current_lateral_accel, [1.5, 2.3, 3.0], [0.5, 0.0, -0.4]))
+    if v_ego > self.target_curve_speed:
+      distance_for_decel = max(self.target_distance, 0.1)
+      self.required_decel = float(np.clip(
+        (v_ego ** 2 - self.target_curve_speed ** 2) / (2.0 * distance_for_decel),
+        0.0,
+        MAX_CURVE_DECEL,
+      ))
     else:
-      boundary_accel = 0.5
+      self.required_decel = 0.0
 
-    # This floor only limits this feature. The model can still request a lower speed.
-    self.target_speed = max(MIN_CURVE_SPEED, curve_speed + boundary_accel * NO_OVERSHOOT_TIME_HORIZON)
-    return self._smooth_target(self.target_speed, v_ego)
+    # Tightening is immediate so a late model detection is not delayed. Relaxing
+    # an existing boundary is gradual to prevent acceleration pulses through a turn.
+    if math.isfinite(self.output_speed) and raw_target > self.output_speed:
+      self.output_speed = min(raw_target, self.output_speed + RELEASE_ACCEL * DT_MDL)
+    else:
+      self.output_speed = raw_target
+
+    return CurveSpeedLimit(self.output_speed, self.required_decel, active=True)
