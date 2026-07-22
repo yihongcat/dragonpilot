@@ -9,7 +9,7 @@ from openpilot.common.filter_simple import FirstOrderFilter
 from openpilot.common.realtime import DT_MDL
 from openpilot.selfdrive.modeld.constants import ModelConstants
 from openpilot.selfdrive.controls.lib.longcontrol import LongCtrlState
-from openpilot.selfdrive.controls.lib.longitudinal_mpc_lib.long_mpc import LongitudinalMpc, LongitudinalPlanSource, STOP_DISTANCE
+from openpilot.selfdrive.controls.lib.longitudinal_mpc_lib.long_mpc import CRUISE_MIN_ACCEL, LongitudinalMpc, LongitudinalPlanSource, STOP_DISTANCE
 from openpilot.selfdrive.controls.lib.longitudinal_mpc_lib.long_mpc import T_IDXS as T_IDXS_MPC
 from openpilot.selfdrive.controls.lib.drive_helpers import CONTROL_N, get_accel_from_plan
 from openpilot.selfdrive.car.cruise import V_CRUISE_MAX, V_CRUISE_UNSET
@@ -76,7 +76,7 @@ class LongitudinalPlanner:
     self.acm = ACM()
     self.aem = AEM()
     self.apm = APM()
-    self.curve_speed_limiter = CurveSpeedLimiter(CP.maxLateralAccel)
+    self.curve_speed_limiter = CurveSpeedLimiter(CP.maxLateralAccel, CP.longitudinalActuatorDelay)
 
   @staticmethod
   def parse_model(model_msg):
@@ -152,16 +152,18 @@ class LongitudinalPlanner:
       self.aem.update_states(model_msg=sm['modelV2'], radar_msg=sm['radarState'], v_ego=v_ego)
       mode = self.aem.get_mode(mode)
 
-    curve_speed = self.curve_speed_limiter.update(
-      sm['modelV2'], sm['controlsState'].curvature, v_ego,
+    curve_limit = self.curve_speed_limiter.update(
+      sm['modelV2'], v_ego, v_cruise,
       dp_curve_speed_reduction, mode == 'blended' and not reset_state,
       sm['carControl'].cruiseControl.override,
     )
-    v_cruise = min(v_cruise, curve_speed)
+    v_cruise = min(v_cruise, curve_limit.speed)
+    curve_cruise_min_accel = min(CRUISE_MIN_ACCEL, -curve_limit.required_decel) if curve_limit.active else CRUISE_MIN_ACCEL
 
     self.mpc.set_weights(prev_accel_constraint, personality=personality)
     self.mpc.set_cur_state(self.v_desired_filter.x, self.a_desired)
-    self.mpc.update(sm['radarState'], v_cruise, personality=personality, stop_distance=dp_stop_distance)
+    self.mpc.update(sm['radarState'], v_cruise, personality=personality, stop_distance=dp_stop_distance,
+                    cruise_min_accel=curve_cruise_min_accel)
 
     self.v_desired_trajectory = np.interp(CONTROL_N_T_IDX, T_IDXS_MPC, self.mpc.v_solution)
     self.a_desired_trajectory = np.interp(CONTROL_N_T_IDX, T_IDXS_MPC, self.mpc.a_solution)
