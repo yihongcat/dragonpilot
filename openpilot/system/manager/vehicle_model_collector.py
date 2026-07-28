@@ -24,7 +24,7 @@ from openpilot.common.basedir import BASEDIR
 class VehicleModelCollector:
   def __init__(self):
     self.base_package = "opendbc.car"
-    self.base_path = f"{BASEDIR}/opendbc/car"
+    self.base_path = f"{BASEDIR}/opendbc_repo/opendbc/car"
     self.exclude_brands = ['body', 'mock']
 
     # Define the lookup dictionary for brand-to-group mappings
