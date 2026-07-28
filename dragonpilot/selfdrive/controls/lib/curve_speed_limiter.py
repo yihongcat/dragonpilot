@@ -10,6 +10,7 @@ from openpilot.common.realtime import DT_MDL
 MIN_CURVE_SPEED = 20.0 * CV.KPH_TO_MS
 NORMAL_CURVE_DECEL = 1.0  # m/s^2, used to decide when to begin slowing on the straight
 MAX_CURVE_DECEL = 1.5  # m/s^2, fallback when the model detects a curve late
+CURVE_DECEL_JERK = 1.0  # m/s^3, smoothly applies and releases curve deceleration
 MIN_MODEL_SPEED = 1.0  # m/s, avoids unstable curvature estimates near a predicted stop
 MIN_CURVATURE = 1e-4
 MAX_STRENGTH_LAT_ACCEL_FACTOR = 0.6
@@ -25,6 +26,13 @@ class CurveSpeedLimit:
   speed: float = math.inf
   required_decel: float = 0.0
   active: bool = False
+
+
+def get_curve_accel(required_decel: float, previous_accel: float, dt: float = DT_MDL) -> float:
+  """Return the jerk-limited acceleration needed to reach the upcoming curve speed."""
+  target_accel = -max(0.0, float(required_decel))
+  max_delta = CURVE_DECEL_JERK * dt
+  return float(np.clip(target_accel, previous_accel - max_delta, previous_accel + max_delta))
 
 
 class CurveSpeedLimiter:

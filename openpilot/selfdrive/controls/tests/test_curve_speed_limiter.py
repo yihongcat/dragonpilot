@@ -6,6 +6,7 @@ import numpy as np
 from openpilot.common.constants import CV
 from openpilot.selfdrive.modeld.constants import ModelConstants
 from dragonpilot.selfdrive.controls.lib.curve_speed_limiter import (
+  CURVE_DECEL_JERK,
   MAX_CURVE_DECEL,
   MAX_STRENGTH_LAT_ACCEL_FACTOR,
   MIN_CURVE_SPEED,
@@ -13,6 +14,7 @@ from dragonpilot.selfdrive.controls.lib.curve_speed_limiter import (
   RELEASE_ACCEL,
   RELEASE_HOLD_FRAMES,
   CurveSpeedLimiter,
+  get_curve_accel,
 )
 
 
@@ -88,6 +90,24 @@ def test_boundary_uses_comfortable_deceleration_distance():
   expected = math.sqrt(limiter.target_curve_speed ** 2 + 2.0 * NORMAL_CURVE_DECEL * limiter.target_distance)
 
   assert np.isclose(result.speed, expected)
+
+
+def test_future_curve_requests_decel_before_speed_boundary_is_exceeded():
+  limiter = CurveSpeedLimiter(1.8)
+  result = update(limiter, model_with_curve(0.003, curve_start=15), speed=25.0, cruise=35.0)
+
+  assert result.active
+  assert result.speed > 25.0
+  assert result.required_decel > 0.0
+  assert get_curve_accel(result.required_decel, 0.0) < 0.0
+
+
+def test_curve_accel_is_jerk_limited_when_applied_and_released():
+  applied = get_curve_accel(0.8, 0.0)
+  assert np.isclose(applied, -CURVE_DECEL_JERK * 0.05)
+
+  released = get_curve_accel(0.0, -0.5)
+  assert np.isclose(released, -0.5 + CURVE_DECEL_JERK * 0.05)
 
 
 def test_actuator_delay_starts_slowing_earlier():
