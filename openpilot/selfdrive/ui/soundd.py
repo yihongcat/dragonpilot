@@ -29,7 +29,6 @@ DB_SCALE = 30 # AMBIENT_DB + DB_SCALE is where MAX_VOLUME is applied
 VOLUME_BASE = 20
 if HARDWARE.get_device_type() == "tizi":
   AMBIENT_DB = 30
-# rick - for c3
 if HARDWARE.get_device_type() in ("tizi", "tici"):
   VOLUME_BASE = 10
 
@@ -86,7 +85,7 @@ class Soundd:
 
     try:
       self._dp_dev_audible_alert_mode = int(Params().get("dp_dev_audible_alert_mode"))
-    except:
+    except (TypeError, ValueError):
       self._dp_dev_audible_alert_mode = 0
 
   def load_sounds(self):
@@ -129,8 +128,10 @@ class Soundd:
           self.pending_stop = False
           break
 
-      # dp - set vol to 0 instead
-      if self._dp_dev_audible_alert_mode == 2 or (self._dp_dev_audible_alert_mode == 1 and self.current_alert in [AudibleAlert.engage, AudibleAlert.disengage]):
+      if self._dp_dev_audible_alert_mode == 2 or (
+          self._dp_dev_audible_alert_mode == 1 and
+          self.current_alert in (AudibleAlert.engage, AudibleAlert.disengage)
+      ):
         self.current_volume = 0
 
     return ret * self.current_volume

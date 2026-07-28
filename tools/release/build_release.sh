@@ -23,7 +23,6 @@ if [ -z "$SOURCE_BRANCH" ]; then
   exit 1
 fi
 
-
 # set git identity
 source /data/identity.sh
 
@@ -32,8 +31,6 @@ rm -rf $BUILD_DIR
 mkdir -p $BUILD_DIR
 cd $BUILD_DIR
 git init
-# git remote add origin git@github.com:commaai/openpilot.git
-# git checkout --orphan $BUILD_BRANCH
 git remote add origin https://github.com/dragonpilot/dev.git
 git checkout --orphan $SOURCE_BRANCH
 
@@ -53,17 +50,11 @@ echo "[-] committing version $VERSION T=$SECONDS"
 git add -f .
 git commit -a -m "dragonpilot v$VERSION release"
 
-# Build
-export PYTHONPATH="$BUILD_DIR"
+# Build and test before launch_chffrplus.sh creates the on-device package
+# symlinks. SConstruct uses the same package roots for build subprocesses.
+export PYTHONPATH="$BUILD_DIR:$BUILD_DIR/msgq_repo:$BUILD_DIR/opendbc_repo:$BUILD_DIR/rednose_repo:$BUILD_DIR/teleoprtc_repo:$BUILD_DIR/tinygrad_repo"
 scons
 
-# if [ -z "$PANDA_DEBUG_BUILD" ]; then
-#   # release panda fw
-#   CERT=/data/pandaextra/certs/release RELEASE=1 scons panda/
-# else
-#   # build with ALLOW_DEBUG=1 to enable features like experimental longitudinal
-#   scons panda/
-# fi
 scons -j$(nproc) panda/
 
 # panda tici
@@ -95,14 +86,13 @@ touch prebuilt
 # dragonpilot customized
 find . -name '*.cc' -delete
 find openpilot/selfdrive/ui/ -name '*.h' -delete
-# rick - some test codes are used in the code
-# find . -type d -name "tests" -exec rm -rf {} +
+# Some test code is imported by runtime code, so don't remove all test folders.
 find . -type d -name 'x86_64' -exec rm -rf {} +
 find . -type d -name 'Darwin' -exec rm -rf {} +
-rm -fr tinygrad_repo/docs/tinygrad_intro.pdf # 1.9M
-rm -fr openpilot/cereal/gen/cpp/log.capnp.h # 2.5M
-rm -fr tinygrad_repo/extra/hip_gpu_driver/gc_10_3_0_offset.h # 1.4 M
-rm -fr tinygrad_repo/extra/accel/tpu/logs/tpu_driver.t1v-n-852cd0d5-w-0.taylor.log.INFO.20210619-062914.26926.gz # 1.3 M
+rm -fr tinygrad_repo/docs/tinygrad_intro.pdf
+rm -fr openpilot/cereal/gen/cpp/log.capnp.h
+rm -fr tinygrad_repo/extra/hip_gpu_driver/gc_10_3_0_offset.h
+rm -fr tinygrad_repo/extra/accel/tpu/logs/tpu_driver.t1v-n-852cd0d5-w-0.taylor.log.INFO.20210619-062914.26926.gz
 
 # Add built files to git
 git add -f .
@@ -113,7 +103,7 @@ git branch -m $RELEASE_BRANCH
 # Run tests
 # cd $BUILD_DIR
 # RELEASE=1 ./openpilot/selfdrive/test/test_onroad.py
-# pytest openpilot/selfdrive/car/tests/test_car_interfaces.py
+# tools/test_runner.py openpilot/selfdrive/car/tests/test_car_interfaces.py
 
 # echo "[-] pushing release T=$SECONDS"
 # REFS=()

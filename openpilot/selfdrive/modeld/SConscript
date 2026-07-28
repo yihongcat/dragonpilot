@@ -26,18 +26,7 @@ tinygrad_files = ["#"+x for x in glob.glob(env.Dir("#tinygrad_repo").relpath + "
 def estimate_pickle_max_size(onnx_size):
   return 1.2 * onnx_size  + 10 * 1024 * 1024  # 20% + 10MB is plenty
 
-# get fastest TG config
-# probe in subprocess so usbgpu locks gets released on process exit
-def probe_devices():
-  return set(subprocess.run(
-    [sys.executable, '-c', 'from tinygrad import Device\nprint("\\n".join(Device.get_available_devices()))'],
-    capture_output=True, text=True, check=True).stdout.strip().splitlines())
-
-available = probe_devices()
-if 'CUDA' in available:
-  tg_backend = 'CUDA'
-  tg_flags = f'DEV={tg_backend}'
-elif 'QCOM' in available:
+if arch == 'larch64':
   tg_backend = 'QCOM'
   tg_flags = f'DEV={tg_backend} IMAGE=1 FLOAT16=1 NOLOCALS=1 JIT_BATCH_SIZE=0 OPENPILOT_HACKS=1'
 else:
@@ -61,9 +50,8 @@ try:
 except FileNotFoundError:
   big_model_available = False
 
-# The big USB-GPU model is optional on release branches that vendor files
-# directly instead of relying on Git LFS. Fall back to the standard model when
-# it is unavailable; modeld also checks for a compiled big-model manifest.
+# Release branches can omit the optional USB-GPU model. Fall back to the
+# standard model instead of creating build targets with missing inputs.
 USBGPU = usbgpu_present() and big_model_available
 if USBGPU:
   usbgpu_tg_flags = f'DEBUG=2 DEV=USB+AMD:LLVM WARP_DEV={tg_backend} FLOAT16=1 JIT_BATCH_SIZE=0 GMMU=0'
