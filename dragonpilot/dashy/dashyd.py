@@ -218,7 +218,7 @@ def extract_lead(lead, sm):
     d_rel = float(lead.dRel)
     v_rel = float(lead.vRel)
     y_rel = float(lead.yRel)
-    has_lead = bool(lead.status)
+    has_lead = bool(lead.present)
 
     # Pre-format lead display values. Each metric ships as a
     # (value, unit) pair so the HUD can tabular-align numbers without
@@ -286,9 +286,9 @@ def extract_live_tracks(sm):
         lead_track_ids = set()
         if sm.valid.get('radarState', False):
             rs = sm['radarState']
-            if rs.leadOne.status and rs.leadOne.radarTrackId >= 0:
+            if rs.leadOne.present and rs.leadOne.radarTrackId >= 0:
                 lead_track_ids.add(rs.leadOne.radarTrackId)
-            if rs.leadTwo.status and rs.leadTwo.radarTrackId >= 0:
+            if rs.leadTwo.present and rs.leadTwo.radarTrackId >= 0:
                 lead_track_ids.add(rs.leadTwo.radarTrackId)
 
         if hasattr(lt, 'points'):

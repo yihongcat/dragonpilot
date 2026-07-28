@@ -50,7 +50,7 @@ class ACM:
 
   def _check_emergency_conditions(self, lead, v_ego, current_time):
     """Check for emergency conditions that require immediate ACM disable."""
-    if not lead or not lead.status:
+    if not lead or not lead.present:
       return False
 
     self.lead_ttc = lead.dRel / max(v_ego, 0.1)
@@ -74,7 +74,7 @@ class ACM:
 
   def _update_lead_status(self, lead, v_ego, current_time):
     """Update lead vehicle detection status."""
-    if lead and lead.status:
+    if lead and lead.present:
       self.lead_ttc = lead.dRel / max(v_ego, 0.1)
 
       if self.lead_ttc < TTC_THRESHOLD:
