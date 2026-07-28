@@ -17,7 +17,8 @@ from openpilot.common.swaglog import cloudlog
 from dragonpilot.selfdrive.controls.lib.acm import ACM
 from dragonpilot.selfdrive.controls.lib.aem import AEM
 from dragonpilot.selfdrive.controls.lib.apm import APM
-from dragonpilot.selfdrive.controls.lib.curve_speed_limiter import CurveSpeedLimiter, get_curve_accel
+from dragonpilot.selfdrive.controls.lib.curve_speed_limiter import (CurveAccelerationController, CurveSpeedLimiter,
+                                                                   select_accel_with_curve)
 
 A_CRUISE_MAX_VALS = [1.6, 1.2, 0.8, 0.6]
 A_CRUISE_MAX_BP = [0., 10.0, 25., 40.]
@@ -89,6 +90,7 @@ class LongitudinalPlanner:
     self.aem = AEM()
     self.apm = APM()
     self.curve_speed_limiter = CurveSpeedLimiter(CP.maxLateralAccel, CP.longitudinalActuatorDelay)
+    self.curve_accel_controller = CurveAccelerationController(dt)
 
   def update(self, sm, dp_flags=0, dp_curve_speed_reduction=0, dp_stop_distance=STOP_DISTANCE):
     if len(sm['carControl'].orientationNED) == 3:
@@ -140,9 +142,8 @@ class LongitudinalPlanner:
     curve_enabled = mode == 'blended' and not reset_state
     curve_limit = self.curve_speed_limiter.update(
       sm['modelV2'], v_ego, v_cruise,
-      dp_curve_speed_reduction, curve_enabled, curve_overriding,
+      dp_curve_speed_reduction, curve_enabled, curve_overriding, self.output_a_target,
     )
-    v_cruise = min(v_cruise, curve_limit.speed)
 
     self.mpc.set_weights(prev_accel_constraint, personality=personality)
     self.mpc.set_cur_state(self.v_desired_filter.x, self.a_desired)
@@ -178,21 +179,23 @@ class LongitudinalPlanner:
                                      self.a_cruise, steer_angle_without_offset, self.CP, self.dt,
                                      accel_coast, self.allow_throttle)
     cruise_accel_before_curve = self.a_cruise
-    if curve_enabled and not curve_overriding and (curve_limit.active or self.a_curve < 0.0):
-      self.a_curve = get_curve_accel(curve_limit.required_decel, self.a_curve, self.dt)
-    else:
-      self.a_curve = 0.0
-    if self.a_curve < 0.0:
-      self.a_cruise = min(self.a_cruise, self.a_curve)
     cruise_should_stop = should_stop(v_ego, self.a_cruise)
 
-    candidates = [(output_a_target_mpc, self.mpc.source, output_should_stop_mpc),
-                  (self.a_cruise, LongitudinalPlanSource.cruise, cruise_should_stop)]
+    base_candidates = [(output_a_target_mpc, self.mpc.source, output_should_stop_mpc),
+                       (self.a_cruise, LongitudinalPlanSource.cruise, cruise_should_stop)]
     if mode == 'blended':
-      candidates.append((output_a_target_e2e, LongitudinalPlanSource.e2e, output_should_stop_e2e))
+      base_candidates.append((output_a_target_e2e, LongitudinalPlanSource.e2e, output_should_stop_e2e))
 
-    output_a_target, self.mpc.source, _ = min(candidates, key=lambda c: c[0])
-    self.output_should_stop = any(should_stop for _, _, should_stop in candidates)
+    base_accel = min(base_candidates, key=lambda candidate: candidate[0])[0]
+    # Curve deceleration is an independent, jerk-limited acceleration cap. It is
+    # deliberately excluded from shouldStop; stopping remains owned by MPC/E2E.
+    curve_accel_limit = self.curve_accel_controller.update(
+      curve_limit, v_ego, not reset_state, curve_overriding, self.output_a_target, base_accel,
+    )
+    self.a_curve = curve_accel_limit.accel if curve_accel_limit.active else 0.0
+    output_a_target, self.mpc.source, self.output_should_stop = select_accel_with_curve(
+      base_candidates, curve_accel_limit, LongitudinalPlanSource.cruise,
+    )
     self.output_a_target = np.clip(output_a_target, ACCEL_MIN, ACCEL_MAX)
 
     curve_transition = curve_limit.active != self.curve_active_prev
@@ -200,11 +203,17 @@ class LongitudinalPlanner:
       def finite_or_negative(value):
         return value if math.isfinite(value) else -1.0
 
-      cloudlog.info(
-        "dp_curve_speed mode=%s enabled=%s active=%s override=%s strength=%d "
-        "v_ego=%.1f cruise=%.1f limit=%.1f curve=%.1f distance=%.1f required_decel=%.2f "
+      curve_log_format = "".join((
+        "dp_curve_speed mode=%s enabled=%s active=%s confirmed=%s unreachable=%s ",
+        "cap_active=%s confirm_frames=%d override=%s strength=%d ",
+        "v_ego=%.1f cruise=%.1f limit=%.1f curve=%.1f distance=%.1f required_decel=%.2f ",
         "curve_accel=%.2f cruise_accel=%.2f output_accel=%.2f source=%s",
-        mode, curve_enabled, curve_limit.active, curve_overriding, dp_curve_speed_reduction,
+      ))
+      cloudlog.info(
+        curve_log_format,
+        mode, curve_enabled, curve_limit.active, curve_limit.confirmed, curve_limit.unreachable,
+        curve_accel_limit.active, self.curve_speed_limiter.confirmation_frames,
+        curve_overriding, dp_curve_speed_reduction,
         v_ego * CV.MS_TO_KPH, v_cruise_setpoint * CV.MS_TO_KPH,
         finite_or_negative(curve_limit.speed) * CV.MS_TO_KPH,
         finite_or_negative(self.curve_speed_limiter.target_curve_speed) * CV.MS_TO_KPH,
