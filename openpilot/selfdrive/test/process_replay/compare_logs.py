@@ -22,18 +22,32 @@ def remove_ignored_fields(msg, ignore):
     if msg.which() != keys[0] and len(keys) > 1:
       continue
 
+    missing = False
     for k in keys[:-1]:
       # indexing into list
       if k.isdigit():
-        attr = attr[int(k)]
+        index = int(k)
+        if index >= len(attr):
+          missing = True
+          break
+        attr = attr[index]
       else:
         attr = getattr(attr, k)
+
+    if missing:
+      continue
 
     v = getattr(attr, keys[-1])
     if isinstance(v, bool):
       val = False
     elif isinstance(v, numbers.Number):
       val = 0
+    elif isinstance(v, _DynamicEnum):
+      val = 0
+    elif isinstance(v, str):
+      val = ""
+    elif isinstance(v, bytes):
+      val = b""
     elif isinstance(v, (list, capnp.lib.capnp._DynamicListBuilder)):
       val = []
     else:
