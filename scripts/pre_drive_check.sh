@@ -106,7 +106,8 @@ run_replay() {
 
 run_sim() {
   stage "Gate 4: official MetaDrive simulation"
-  CI=1 xvfb-run -a -s "-screen 0 1920x1080x24" \
+  BLOCK="${BLOCK:-},journald,soundd" DP_CPU_ONLY_SIMULATION=1 CI=1 \
+    xvfb-run -a -s "-screen 0 1920x1080x24" \
     uv run --python 3.12 \
     --with "${METADRIVE_DEP}" \
     --with pytest \

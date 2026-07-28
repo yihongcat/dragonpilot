@@ -153,7 +153,9 @@ uv run --python 3.12 scons -j4
 openpilot/tools/sim/
 ```
 
-Docker 流程使用虚拟显示器运行 MetaDrive，并直接选择实际模拟测试用例。若用例被跳过，Gate 4 不算通过。
+Docker 流程使用虚拟显示器和 CPU-only 模式运行 MetaDrive，并直接选择实际模拟测试用例。CPU-only
+模式只放宽由模型推理延迟引起的临时定位和通信时序检查；进程存活、进入 active、持续控制和其他事件检查仍然执行。
+若用例被跳过，Gate 4 不算通过。
 
 模拟测试必须确认：
 
