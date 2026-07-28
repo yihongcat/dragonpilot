@@ -10,6 +10,7 @@ from openpilot.common.filter_simple import FirstOrderFilter
 from openpilot.common.realtime import Ratekeeper
 from openpilot.common.utils import retry
 from openpilot.common.swaglog import cloudlog
+from openpilot.common.params import Params
 
 from openpilot.system import micd
 from openpilot.common.hardware import HARDWARE
@@ -28,6 +29,8 @@ DB_SCALE = 30 # AMBIENT_DB + DB_SCALE is where MAX_VOLUME is applied
 VOLUME_BASE = 20
 if HARDWARE.get_device_type() == "tizi":
   AMBIENT_DB = 30
+# rick - for c3
+if HARDWARE.get_device_type() in ("tizi", "tici"):
   VOLUME_BASE = 10
 
 AudibleAlert = log.SelfdriveState.AudibleAlert
@@ -49,7 +52,7 @@ sound_list: dict[int, tuple[str, int | None, float]] = {
   AudibleAlert.warningSoft: ("critical.wav", None, MAX_VOLUME),
   AudibleAlert.warningImmediate: ("dm_critical.wav", None, MAX_VOLUME),
 }
-if HARDWARE.get_device_type() == "tizi":
+if HARDWARE.get_device_type() in ("tizi", "tici"):
   sound_list.update({
     AudibleAlert.engage: ("engage_tizi.wav", 1, MAX_VOLUME),
     AudibleAlert.disengage: ("disengage_tizi.wav", 1, MAX_VOLUME),
@@ -80,6 +83,11 @@ class Soundd:
     self.pending_stop = False
 
     self.spl_filter_weighted = FirstOrderFilter(0, 2.5, FILTER_DT, initialized=False)
+
+    try:
+      self._dp_dev_audible_alert_mode = int(Params().get("dp_dev_audible_alert_mode"))
+    except:
+      self._dp_dev_audible_alert_mode = 0
 
   def load_sounds(self):
     self.loaded_sounds: dict[int, np.ndarray] = {}
@@ -120,6 +128,10 @@ class Soundd:
           self.current_alert = AudibleAlert.none
           self.pending_stop = False
           break
+
+      # dp - set vol to 0 instead
+      if self._dp_dev_audible_alert_mode == 2 or (self._dp_dev_audible_alert_mode == 1 and self.current_alert in [AudibleAlert.engage, AudibleAlert.disengage]):
+        self.current_volume = 0
 
     return ret * self.current_volume
 

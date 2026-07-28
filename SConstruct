@@ -89,6 +89,9 @@ allowed_system_libs = {
   "EGL", "GLESv2", "GL",
   "Qt5Charts", "Qt5Core", "Qt5Gui", "Qt5Widgets",
   "dl", "drm", "gbm", "m", "pthread",
+  # dragonpilot: comma3 multi-panda USB (selfdrive/pandad_tici) + cabana/jotpluggler need libusb.
+  # Upstream removed USB and dropped libusb from this whitelist; we keep aux-panda so re-allow it.
+  "usb-1.0",
 }
 
 def _resolve_lib(env, name):
@@ -156,7 +159,7 @@ env = Environment(
   LIBPATH=[
     "#openpilot/common",
     "#msgq_repo",
-    "#openpilot/selfdrive/pandad",
+    "#selfdrive/pandad_tici" if "TICI_DOS" in os.environ else "#openpilot/selfdrive/pandad",
     "#rednose_repo/rednose/helpers",
     [x.LIB_DIR for x in pkgs],
   ],
@@ -248,6 +251,13 @@ def prune_cache_dir(target=None, source=None, env=None):
     cache_size -= os.path.getsize(f)
     os.unlink(f)
 
+# dragonpilot settings generation — runs every scons invocation, idempotent.
+# Writes openpilot/common/params_keys.h in place; we don't declare a target so scons
+# treats it purely as a pre-build side effect.
+if env.Execute('./generate_settings.py') != 0:
+  Exit('generate_settings.py failed')
+
+
 # ********** start building stuff **********
 
 # Build common module
@@ -271,6 +281,7 @@ Export('messaging')
 
 # Build other submodules
 SConscript(['panda/SConscript'])
+SConscript(['panda_tici/SConscript'])
 
 # Build rednose library
 SConscript(['rednose_repo/rednose/SConscript'])
@@ -285,6 +296,7 @@ if arch == "larch64":
 
 # Build selfdrive
 SConscript([
+  'selfdrive/pandad_tici/SConscript',
   'openpilot/selfdrive/pandad/SConscript',
   'openpilot/selfdrive/controls/lib/longitudinal_mpc_lib/SConscript',
   'openpilot/selfdrive/locationd/SConscript',

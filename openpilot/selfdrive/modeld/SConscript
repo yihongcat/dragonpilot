@@ -54,7 +54,17 @@ tg_devices = { # which device to put jit inputs to at runtime
   },
 }
 
-USBGPU = usbgpu_present() # or release # TODO always build big model on release
+big_model_path = File("models/big_driving_supercombo.onnx").abspath
+try:
+  big_model_sources = get_existing_chunks(big_model_path)
+  big_model_available = sum(os.path.getsize(path) for path in big_model_sources) > 1024 * 1024
+except FileNotFoundError:
+  big_model_available = False
+
+# The big USB-GPU model is optional on release branches that vendor files
+# directly instead of relying on Git LFS. Fall back to the standard model when
+# it is unavailable; modeld also checks for a compiled big-model manifest.
+USBGPU = usbgpu_present() and big_model_available
 if USBGPU:
   usbgpu_tg_flags = f'DEBUG=2 DEV=USB+AMD:LLVM WARP_DEV={tg_backend} FLOAT16=1 JIT_BATCH_SIZE=0 GMMU=0'
   # the USB+AMD GPU takes an exclusive flock; serialize all targets that touch it

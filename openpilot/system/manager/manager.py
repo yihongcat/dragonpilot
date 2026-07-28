@@ -12,7 +12,7 @@ import openpilot.system.sentry as sentry
 from openpilot.common.utils import atomic_write
 from openpilot.common.params import Params, ParamKeyFlag
 from openpilot.common.text_window import TextWindow
-from openpilot.common.hardware import HARDWARE
+from openpilot.common.hardware import HARDWARE, TICI
 from openpilot.system.manager.helpers import unblock_stdout, save_bootlog
 from openpilot.system.manager.process import ensure_running
 from openpilot.system.manager.process_config import managed_processes
@@ -20,6 +20,23 @@ from openpilot.system.athena.registration import register, UNREGISTERED_DONGLE_I
 from openpilot.common.swaglog import cloudlog, add_file_handler
 from openpilot.common.version import get_build_metadata
 from openpilot.common.hardware.hw import Paths
+from openpilot.system.manager.vehicle_model_collector import VehicleModelCollector
+
+# rick - dynamically import panda
+import importlib
+
+# Pre-register panda_main as panda before loading it
+target_mod = "panda_tici" if "TICI_DOS" in os.environ else "panda"
+
+print(f"panda dir: {target_mod}")
+
+_mod = importlib.import_module(target_mod)
+
+# 👇 Insert alias so "from panda import ..." inside panda_main works
+sys.modules["panda"] = _mod
+
+# Re-export everything
+globals().update({k: v for k, v in _mod.__dict__.items() if not k.startswith("_")})
 
 
 def manager_init() -> None:
@@ -43,6 +60,7 @@ def manager_init() -> None:
     default_value = params.get_default_value(k)
     if default_value is not None and params.get(k) is None:
       params.put(k, default_value, block=True)
+  params.put("dp_dev_model_list", VehicleModelCollector().get_json())
 
   # Create folders needed for msgq
   try:
@@ -68,7 +86,8 @@ def manager_init() -> None:
   if reg_res:
     dongle_id = reg_res
   else:
-    raise Exception(f"Registration failed for device {serial}")
+    dongle_id = "UnregisteredDevice"
+    # raise Exception(f"Registration failed for device {serial}")
   os.environ['DONGLE_ID'] = dongle_id  # Needed for swaglog
   os.environ['GIT_ORIGIN'] = build_metadata.openpilot.git_normalized_origin # Needed for swaglog
   os.environ['GIT_BRANCH'] = build_metadata.channel # Needed for swaglog
@@ -120,6 +139,15 @@ def manager_thread() -> None:
   ensure_running(managed_processes.values(), False, params=params, CP=sm['carParams'], not_run=ignore)
 
   started_prev = False
+
+  dp_dev_delay_time_started: float = 0.
+  dp_dev_delay_loggerd = int(params.get('dp_dev_delay_loggerd') or 0)
+
+  # Dictionary of processes to be delayed [process_name: delay_seconds]
+  dp_dev_delay_start_times: dict[str, float] = {
+    'loggerd': dp_dev_delay_loggerd,
+    'encoderd': dp_dev_delay_loggerd
+  }
   ignition_prev = False
 
   while True:
@@ -140,10 +168,22 @@ def manager_thread() -> None:
     if started != started_prev:
       params.put_bool("IsOffroad", not started, block=True)
 
+    dp_ignore: list[str] = []
+    if started and not started_prev:
+      dp_dev_delay_time_started = time.monotonic()
+    elif not started and started_prev:
+      dp_dev_delay_time_started = 0.
+
+    if dp_dev_delay_time_started > 0.:
+      cur_time = time.monotonic()
+      for name, delay_time in dp_dev_delay_start_times.items():
+        if cur_time - dp_dev_delay_time_started < delay_time: # type: ignore
+          dp_ignore.append(name)
+
     started_prev = started
     ignition_prev = ignition
 
-    ensure_running(managed_processes.values(), started, params=params, CP=sm['carParams'], not_run=ignore)
+    ensure_running(managed_processes.values(), started, params=params, CP=sm['carParams'], not_run=list(set(ignore) | set(dp_ignore)))
 
     running = ' '.join("{}{}\u001b[0m".format("\u001b[32m" if p.proc.is_alive() else "\u001b[31m", p.name)
                        for p in managed_processes.values() if p.proc)
@@ -165,8 +205,10 @@ def manager_thread() -> None:
 
     # Exit main loop when uninstall/shutdown/reboot is needed
     shutdown = False
-    for param in ("DoUninstall", "DoShutdown", "DoReboot"):
+    for param in ("DoUninstall", "DoShutdown", "DoReboot", "dp_dev_reset_conf"):
       if params.get_bool(param):
+        if TICI and param == "dp_dev_reset_conf":
+          os.system("rm -fr /data/params/d/dp_*")
         shutdown = True
         params.put("LastManagerExitReason", f"{param} {datetime.datetime.now()}", block=True)
         cloudlog.warning(f"Shutting down manager - {param} set")
@@ -201,6 +243,9 @@ def main() -> None:
   elif params.get_bool("DoShutdown"):
     cloudlog.warning("shutdown")
     HARDWARE.shutdown()
+  elif params.get_bool("dp_dev_reset_conf"):
+    cloudlog.warning("reboot")
+    HARDWARE.reboot()
 
 
 if __name__ == "__main__":

@@ -12,6 +12,8 @@ from openpilot.system.ui.lib.application import gui_app, FontWeight, MousePos
 from openpilot.system.ui.lib.multilang import tr, trn
 from openpilot.system.ui.widgets.label import gui_label
 from openpilot.system.ui.widgets import Widget
+from openpilot.selfdrive.ui.version_text import current_version_description
+import os
 
 HEADER_HEIGHT = 80
 HEAD_BUTTON_FONT_SIZE = 40
@@ -19,6 +21,8 @@ CONTENT_MARGIN = 40
 SPACING = 25
 RIGHT_COLUMN_WIDTH = 750
 REFRESH_INTERVAL = 10.0
+
+LITE = os.getenv("LITE") is not None
 
 
 class HomeLayoutState(IntEnum):
@@ -228,6 +232,13 @@ class HomeLayout(Widget):
     self._prev_alerts_present = alerts_present
 
   def _get_version_text(self) -> str:
-    brand = "openpilot"
-    description = self.params.get("UpdaterCurrentDescription")
-    return f"{brand} {description}" if description else brand
+    brand = "dragonpilot"
+    if LITE:
+      if "TICI_TRES" in os.environ:
+        device_type = " - XLite"
+      else:
+        device_type = " - Lite"
+    else:
+      device_type = ""
+    description = current_version_description(self.params)
+    return f"{brand}{device_type} {description}" if description else f"{brand}{device_type}"

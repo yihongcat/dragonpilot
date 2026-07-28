@@ -7,7 +7,7 @@ import openpilot.cereal.messaging as messaging
 
 from openpilot.cereal import log
 from opendbc.car.structs import car
-from msgq.visionipc import VisionIpcClient, VisionStreamType
+from msgq.visionipc import VisionIpcClient
 
 
 from openpilot.common.params import Params
@@ -24,9 +24,11 @@ from openpilot.selfdrive.selfdrived.alertmanager import AlertManager, set_offroa
 
 from openpilot.common.version import get_build_metadata
 from openpilot.common.hardware import HARDWARE
+from openpilot.common.hardware.capabilities import DRIVER_CAMERA_PROBE_TIME, driver_camera_present, set_driver_camera_present
+from opendbc.safety import ALTERNATIVE_EXPERIENCE
 
 REPLAY = "REPLAY" in os.environ
-SIMULATION = "SIMULATION" in os.environ
+SIMULATION = "SIMULATION" in os.environ or os.getenv("LITE") is not None
 TESTING_CLOSET = "TESTING_CLOSET" in os.environ
 
 LONGITUDINAL_PERSONALITY_MAP = {v: k for k, v in log.LongitudinalPersonality.schema.enumerants.items()}
@@ -44,7 +46,6 @@ MonitoringPolicy = log.DriverMonitoringState.MonitoringPolicy
 
 IGNORED_SAFETY_MODES = (SafetyModel.silent, SafetyModel.noOutput)
 
-
 class SelfdriveD:
   def __init__(self, CP=None):
     self.params = Params()
@@ -61,10 +62,15 @@ class SelfdriveD:
 
     self.car_events = CarSpecificEvents(self.CP)
 
+    # dp - ALKA: check if ALKA is enabled
+    self.alka = bool(self.CP.alternativeExperience & ALTERNATIVE_EXPERIENCE.ALKA)
+
     self.pose_calibrator = PoseCalibrator()
     self.calibrated_pose: Pose | None = None
     self.excessive_actuation_check = ExcessiveActuationCheck()
     self.excessive_actuation = self.params.get("Offroad_ExcessiveActuation") is not None
+    self.driver_camera_missing_since: float | None = None
+    self.driver_camera_probe_complete = False
 
     # Setup sockets
     self.pm = messaging.PubMaster(['selfdriveState', 'onroadEvents'])
@@ -77,16 +83,16 @@ class SelfdriveD:
     # TODO: de-couple selfdrived with card/conflate on carState without introducing controls mismatches
     self.car_state_sock = messaging.sub_sock('carState', timeout=20)
 
-    ignore = self.sensor_packets + self.gps_packets + ['alertDebug', 'lateralManeuverPlan']
+    ignore = self.sensor_packets + self.gps_packets + ['alertDebug', 'lateralManeuverPlan'] + ['modelExt']
     if SIMULATION:
-      ignore += ['driverCameraState', 'managerState']
+      ignore += ['driverMonitoringState', 'driverCameraState', 'managerState']
     if REPLAY:
       # no vipc in replay will make them ignored anyways
       ignore += ['roadCameraState', 'wideRoadCameraState']
     self.sm = messaging.SubMaster(['deviceState', 'pandaStates', 'peripheralState', 'modelV2', 'liveCalibration',
                                    'carOutput', 'driverMonitoringState', 'longitudinalPlan', 'livePose', 'liveDelay',
                                    'managerState', 'liveParameters', 'radarState', 'liveTorqueParameters',
-                                   'controlsState', 'carControl', 'driverAssistance', 'alertDebug', 'userBookmark',
+                                   'controlsState', 'carControl', 'driverAssistance', 'alertDebug', 'userBookmark', 'modelExt',
                                    'lateralManeuverPlan'] + \
                                    self.camera_packets + self.sensor_packets + self.gps_packets,
                                   ignore_alive=ignore, ignore_avg_freq=ignore,
@@ -125,11 +131,14 @@ class SelfdriveD:
     self.recalibrating_seen = False
     self.dm_lockout_set = False
     self.dm_uncertain_alerted = False
-    self.state_machine = StateMachine()
+    self.state_machine = StateMachine(self.alka)
     self.rk = Ratekeeper(100, print_delay_threshold=None)
 
+    # dp
+    self.dp_lat_road_edge_detection_cooldown: float = 0.
+
     # Determine startup event
-    self.startup_event = EventName.startup if build_metadata.openpilot.comma_remote and build_metadata.tested_channel else EventName.startupMaster
+    self.startup_event = EventName.startup #if build_metadata.openpilot.comma_remote and build_metadata.tested_channel else EventName.startupMaster
     if HARDWARE.get_device_type() == 'mici':
       self.startup_event = None
     if not car_recognized:
@@ -144,6 +153,45 @@ class SelfdriveD:
       set_offroad_alert("Offroad_CarUnrecognized", True)
     elif self.CP.passive:
       self.events.add(EventName.dashcamMode, static=True)
+
+  def _ignore_sock_checks(self, service: str) -> None:
+    if service not in self.sm.ignore_alive:
+      self.sm.ignore_alive.append(service)
+    if service not in self.sm.ignore_valid:
+      self.sm.ignore_valid.append(service)
+
+  def _restore_sock_checks(self, service: str) -> None:
+    if service in self.sm.ignore_alive:
+      self.sm.ignore_alive.remove(service)
+    if service in self.sm.ignore_valid:
+      self.sm.ignore_valid.remove(service)
+
+  def _update_driver_camera_checks(self) -> None:
+    if self.driver_camera_probe_complete:
+      return
+
+    available_streams = VisionIpcClient.available_streams("camerad", block=False)
+    present = driver_camera_present(available_streams)
+    if present is True:
+      self.driver_camera_missing_since = None
+      set_driver_camera_present(self.params, True)
+      self._restore_sock_checks('driverCameraState')
+      self._restore_sock_checks('driverMonitoringState')
+      self.driver_camera_probe_complete = True
+      return
+    if present is None:
+      self.driver_camera_missing_since = None
+      return
+
+    if self.driver_camera_missing_since is None:
+      self.driver_camera_missing_since = time.monotonic()
+      return
+    if time.monotonic() - self.driver_camera_missing_since >= DRIVER_CAMERA_PROBE_TIME:
+      set_driver_camera_present(self.params, False)
+      self._ignore_sock_checks('driverCameraState')
+      self._ignore_sock_checks('driverMonitoringState')
+      set_offroad_alert("Offroad_UnregisteredHardware", False)
+      self.driver_camera_probe_complete = True
 
   def update_events(self, CS):
     """Compute onroadEvents from carState"""
@@ -284,9 +332,11 @@ class SelfdriveD:
     # Handle lane change
     if self.sm['modelV2'].meta.laneChangeState == LaneChangeState.preLaneChange:
       direction = self.sm['modelV2'].meta.laneChangeDirection
-      if (CS.leftBlindspot and direction == LaneChangeDirection.left) or \
-         (CS.rightBlindspot and direction == LaneChangeDirection.right):
-        self.events.add(EventName.laneChangeBlocked)
+      if ((CS.leftBlindspot or self.sm['modelExt'].leftEdgeDetected) and direction == LaneChangeDirection.left) or \
+         ((CS.rightBlindspot or self.sm['modelExt'].rightEdgeDetected) and direction == LaneChangeDirection.right):
+        self.dp_lat_road_edge_detection_cooldown = time.monotonic() + 0.5
+        if time.monotonic() <= self.dp_lat_road_edge_detection_cooldown:
+          self.events.add(EventName.laneChangeBlocked)
       else:
         if direction == LaneChangeDirection.left:
           self.events.add(EventName.preLaneChangeLeft)
@@ -433,19 +483,12 @@ class SelfdriveD:
     CS = _car_state.carState if _car_state else self.CS_prev
 
     self.sm.update(0)
+    self._update_driver_camera_checks()
 
     if not self.initialized:
       all_valid = CS.canValid and self.sm.all_checks()
       timed_out = self.sm.frame * DT_CTRL > 6.
       if all_valid or timed_out or (SIMULATION and not REPLAY):
-        available_streams = VisionIpcClient.available_streams("camerad", block=False)
-        if VisionStreamType.VISION_STREAM_ROAD not in available_streams:
-          self.sm.ignore_alive.append('roadCameraState')
-          self.sm.ignore_valid.append('roadCameraState')
-        if VisionStreamType.VISION_STREAM_WIDE_ROAD not in available_streams:
-          self.sm.ignore_alive.append('wideRoadCameraState')
-          self.sm.ignore_valid.append('wideRoadCameraState')
-
         if REPLAY and any(ps.controlsAllowed for ps in self.sm['pandaStates']):
           self.state_machine.state = State.enabled
 

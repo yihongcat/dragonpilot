@@ -4,7 +4,9 @@ from openpilot.common.parameterized import parameterized_class
 
 from openpilot.cereal import log
 
-from openpilot.selfdrive.controls.lib.longitudinal_mpc_lib.long_mpc import get_safe_obstacle_distance, get_stopped_equivalence_factor, get_T_FOLLOW
+from openpilot.selfdrive.controls.lib.longitudinal_mpc_lib.long_mpc import (
+  STOP_DISTANCE, get_safe_obstacle_distance, get_stopped_equivalence_factor, get_T_FOLLOW,
+)
 from openpilot.selfdrive.test.longitudinal_maneuvers.maneuver import Maneuver
 
 
@@ -12,6 +14,20 @@ def desired_follow_distance(v_ego, v_lead, t_follow=None):
   if t_follow is None:
     t_follow = get_T_FOLLOW()
   return get_safe_obstacle_distance(v_ego, t_follow) - get_stopped_equivalence_factor(v_lead)
+
+
+@pytest.mark.parametrize("personality", [
+  log.LongitudinalPersonality.relaxed,
+  log.LongitudinalPersonality.standard,
+  log.LongitudinalPersonality.aggressive,
+])
+def test_custom_stop_distance_applies_equal_offset(personality):
+  t_follow = get_T_FOLLOW(personality)
+  default_distance = get_safe_obstacle_distance(10.0, t_follow)
+  custom_distance = get_safe_obstacle_distance(10.0, t_follow, 2.0)
+
+  assert default_distance - custom_distance == STOP_DISTANCE - 2.0
+
 
 def run_following_distance_simulation(v_lead, t_end=100.0, e2e=False, personality=0):
   man = Maneuver(

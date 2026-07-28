@@ -11,11 +11,15 @@ from openpilot.common.params import Params
 from openpilot.common.spinner import Spinner
 from openpilot.selfdrive.selfdrived.alertmanager import set_offroad_alert
 from openpilot.common.hardware import HARDWARE, PC
+from openpilot.common.hardware.capabilities import DRIVER_CAMERA_PRESENT_PARAM
 from openpilot.common.hardware.hw import Paths
 from openpilot.common.swaglog import cloudlog
+import os
 
 
 UNREGISTERED_DONGLE_ID = "UnregisteredDevice"
+
+LITE = os.getenv("LITE") is not None
 
 def is_registered_device() -> bool:
   dongle = Params().get("DongleId")
@@ -51,15 +55,28 @@ def register(show_spinner=False) -> str | None:
       spinner = Spinner()
       spinner.update("registering device")
 
+    if LITE:
+      params.put("DongleId", UNREGISTERED_DONGLE_ID)
+      set_offroad_alert("Offroad_UnregisteredHardware", False)
+      return UNREGISTERED_DONGLE_ID
+
     # Block until we get the imei
     serial = HARDWARE.get_serial()
     start_time = time.monotonic()
     imei: str | None = None
+    skip_imei_count = 0
     while imei is None:
       try:
         imei = HARDWARE.get_imei()
       except Exception:
         cloudlog.exception("Error getting imei, trying again...")
+        if show_spinner:
+          spinner.update(f"registering device - serial: {serial}, Error getting IMEI, trying {skip_imei_count}/30")
+        # rick - no imei = can't register = skip everything
+        if skip_imei_count > 30:
+          params.put("DongleId", UNREGISTERED_DONGLE_ID)
+          return UNREGISTERED_DONGLE_ID
+        skip_imei_count += 1
         time.sleep(1)
 
       if time.monotonic() - start_time > 60 and show_spinner:
@@ -98,7 +115,8 @@ def register(show_spinner=False) -> str | None:
 
   if dongle_id:
     params.put("DongleId", dongle_id, block=True)
-    set_offroad_alert("Offroad_UnregisteredHardware", (dongle_id == UNREGISTERED_DONGLE_ID) and not PC)
+    no_driver_camera = params.get(DRIVER_CAMERA_PRESENT_PARAM) is not None and not params.get_bool(DRIVER_CAMERA_PRESENT_PARAM)
+    set_offroad_alert("Offroad_UnregisteredHardware", (dongle_id == UNREGISTERED_DONGLE_ID) and not PC and not LITE and not no_driver_camera)
   return dongle_id
 
 

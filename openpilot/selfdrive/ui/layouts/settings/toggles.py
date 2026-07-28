@@ -8,8 +8,11 @@ from openpilot.system.ui.lib.application import gui_app
 from openpilot.system.ui.lib.multilang import tr, tr_noop
 from openpilot.system.ui.widgets import DialogResult
 from openpilot.selfdrive.ui.ui_state import ui_state
+import os
 
 PERSONALITY_TO_INT = log.LongitudinalPersonality.schema.enumerants
+
+LITE = os.getenv("LITE") is not None
 
 # Description constants
 DESCRIPTIONS = {
@@ -31,6 +34,8 @@ DESCRIPTIONS = {
   'RecordFront': tr_noop("Upload data from the driver facing camera and help improve the driver monitoring algorithm."),
   "IsMetric": tr_noop("Display speed in km/h instead of mph."),
   "RecordAudio": tr_noop("Record and store microphone audio while driving. The audio will be included in the dashcam video in comma connect."),
+  "DisableLogging": tr("Disable logging service"),
+  "DisableUpdates": tr("Disable update service"),
 }
 
 
@@ -90,6 +95,18 @@ class TogglesLayout(Widget):
         "metric.png",
         False,
       ),
+      "DisableLogging": (
+        lambda: tr("Disable Logging"),
+        DESCRIPTIONS["DisableLogging"],
+        "",
+        False,
+      ),
+      "DisableUpdates": (
+        lambda: tr("Disable Updates"),
+        DESCRIPTIONS["DisableUpdates"],
+        "",
+        False,
+      ),
     }
 
     self._long_personality_setting = multiple_button_item(
@@ -104,6 +121,11 @@ class TogglesLayout(Widget):
 
     self._toggles = {}
     self._locked_toggles = set()
+
+    if LITE:
+      for key in ['RecordAudio']:
+          self._toggle_defs.pop(key, None)
+
     for param, (title, desc, icon, needs_restart) in self._toggle_defs.items():
       toggle = toggle_item(
         title,
