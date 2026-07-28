@@ -19,9 +19,12 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
       git-lfs \
       libcurl4-openssl-dev \
       libgl1 \
+      libgl1-mesa-dri \
       libusb-1.0-0-dev \
       libx11-6 \
       locales \
+      xauth \
+      xvfb \
     && rm -rf /var/lib/apt/lists/*
 
 COPY --from=ghcr.io/astral-sh/uv:0.11.21 /uv /uvx /bin/

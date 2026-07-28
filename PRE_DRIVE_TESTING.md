@@ -153,6 +153,8 @@ uv run --python 3.12 scons -j4
 openpilot/tools/sim/
 ```
 
+Docker 流程使用虚拟显示器运行 MetaDrive，并直接选择实际模拟测试用例。若用例被跳过，Gate 4 不算通过。
+
 模拟测试必须确认：
 
 - manager 能正常启动上路进程。
