@@ -131,9 +131,11 @@ case "${MODE}" in
     run_build
     ;;
   replay)
+    run_build
     run_replay
     ;;
   sim)
+    run_build
     run_sim
     ;;
   all)

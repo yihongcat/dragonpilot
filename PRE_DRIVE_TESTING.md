@@ -51,8 +51,8 @@ Docker 测试要求工作树干净：先把准备测试的内容提交到本地 
 |---|---|---|
 | `quick` | Git/LFS 完整性、无驾驶员摄像头能力测试、弯道减速单元测试 | 每次代码修改 |
 | `build` | `quick` 加完整本地 SCons 构建 | 合并官方 master、目录或 C++ 改动 |
-| `replay` | `quick` 加 Toyota 的 `card/selfdrived/controlsd/plannerd` 官方路线回放 | 车辆接口、启用链、纵向规划改动 |
-| `sim` | `quick` 加官方 MetaDrive 自动驾驶测试 | manager、进程启动和启用链改动 |
+| `replay` | `quick`、完整构建，加 Toyota 的 `card/selfdrived/controlsd/plannerd` 官方路线回放 | 车辆接口、启用链、纵向规划改动 |
+| `sim` | `quick`、完整构建，加官方 MetaDrive 自动驾驶测试 | manager、进程启动和启用链改动 |
 | `all` | 上述所有本地检查 | 准备推送给设备或实车验证 |
 
 第一次执行会由 `uv` 准备 Python 3.12 环境并下载依赖。路线回放和 MetaDrive 首次运行时间较长，之后会使用缓存。
