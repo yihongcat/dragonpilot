@@ -1,3 +1,12 @@
+dragonpilot 0.11.2 r1 (2026-07-23)
+=======================
+* ✅ 基于 test/no-driver-cam-fix 合并 commaai/openpilot 最新 master
+* ✅ 同步新版 openpilot 系统架构、驾驶模型流程、界面与进程配置
+* ✅ 沿用原 0.11.1 已具备的官方世界模型驾驶模型能力
+* ✅ 保留 dragonpilot 功能：LITE、无驾驶员摄像头、Dashy、自定义纵向控制及车型扩展
+* ⚠️ 官方新增 Lebowski 强化学习大模型仅适用于兼容 USB-GPU；本版本未内置 1.75 GB 模型，无外置 GPU 的设备继续使用标准驾驶模型
+* ⚠️ 本版本为大规模整合测试版，请先离线检查并验证车型功能后再日常使用
+
 dragonpilot 0.11.1 r1 (2026-06-22)
 =======================
 * ✅ openpilot 0.11.1 (devel-staging) (2026-06-05)

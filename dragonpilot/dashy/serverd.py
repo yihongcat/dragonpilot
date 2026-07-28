@@ -44,15 +44,15 @@ from urllib.parse import quote
 
 from aiohttp import web
 
-from cereal import messaging
+from openpilot.cereal import messaging
 
 from openpilot.common.params import Params
-from openpilot.system.hardware import PC, HARDWARE
+from openpilot.common.hardware import PC, HARDWARE
 from openpilot.system.ui.lib.multilang import multilang as base_multilang
 from dragonpilot.settings import SETTINGS
 
 try:
-    from openpilot.system.version import get_build_metadata as _get_build_metadata
+    from openpilot.common.version import get_build_metadata as _get_build_metadata
 except Exception:
     _get_build_metadata = None
 
@@ -115,7 +115,7 @@ class AppCache:
             # params so brand/longitudinal-gated settings still show when configuring parked.
             car_params_bytes = self.params.get("CarParamsPersistent") or self.params.get("CarParams")
             if car_params_bytes:
-                from cereal import car
+                from opendbc.car.structs import car
                 with car.CarParams.from_bytes(car_params_bytes) as cp:
                     result['brand'] = cp.brand
                     result['openpilot_longitudinal_control'] = cp.openpilotLongitudinalControl

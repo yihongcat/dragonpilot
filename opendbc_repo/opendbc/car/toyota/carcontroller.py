@@ -41,9 +41,8 @@ LOCK_UNLOCK_CAN_ID = 0x750
 UNLOCK_CMD = b'\x40\x05\x30\x11\x00\x40\x00\x00'
 LOCK_CMD = b'\x40\x05\x30\x11\x00\x80\x00\x00'
 
-from cereal import car
-PARK = car.CarState.GearShifter.park
-DRIVE = car.CarState.GearShifter.drive
+PARK = structs.CarState.GearShifter.park
+DRIVE = structs.CarState.GearShifter.drive
 
 def get_long_tune(CP, params):
   if CP.carFingerprint in TSS2_CAR:

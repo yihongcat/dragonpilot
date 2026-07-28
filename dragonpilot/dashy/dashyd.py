@@ -33,7 +33,7 @@ can be a pure display layer with no conversion logic.
 Publishes: dashyState (pre-serialized JSON at 15Hz)
 """
 import json
-import cereal.messaging as messaging
+import openpilot.cereal.messaging as messaging
 from openpilot.common.params import Params
 from openpilot.common.realtime import Ratekeeper
 from openpilot.common.swaglog import cloudlog
@@ -77,7 +77,7 @@ def get_car_params_from_params():
     if _car_params_cache is not None:
         return _car_params_cache
     try:
-        from cereal import car
+        from opendbc.car.structs import car
         cp_bytes = _ensure_params().get("CarParams")
         if cp_bytes:
             with car.CarParams.from_bytes(cp_bytes) as cp:
@@ -438,10 +438,10 @@ def _available_topics(topics_cfg):
     in the TOPICS entry), which the frontend already null-checks.
     """
     try:
-        from cereal.services import SERVICE_LIST as _services
+        from openpilot.cereal.services import SERVICE_LIST as _services
     except ImportError:
         try:
-            from cereal.services import services as _services
+            from openpilot.cereal.services import services as _services
         except ImportError:
             return topics_cfg
 

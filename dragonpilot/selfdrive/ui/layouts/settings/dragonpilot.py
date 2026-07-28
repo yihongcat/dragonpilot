@@ -24,7 +24,7 @@ from dragonpilot.system.ui.lib.multilang import tr
 from openpilot.system.ui.widgets.list_view import toggle_item, simple_item, button_item, spin_button_item, double_spin_button_item, text_spin_button_item
 from openpilot.system.ui.lib.application import gui_app
 from openpilot.system.ui.widgets.confirm_dialog import ConfirmDialog
-from openpilot.system.hardware import HARDWARE
+from openpilot.common.hardware import HARDWARE
 from dragonpilot.settings import SETTINGS, extract_depends_on_refs
 
 LITE = os.getenv("LITE") is not None

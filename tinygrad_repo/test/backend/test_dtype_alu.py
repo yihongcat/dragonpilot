@@ -7,7 +7,6 @@ from tinygrad.runtime.ops_python import from_storage_scalar
 from tinygrad.renderer.ptx import PTXRenderer
 from tinygrad.renderer.nir import NIRRenderer
 from tinygrad.uop import Ops
-from test.helpers import CI
 import numpy as np
 import pytest
 from hypothesis import assume, given, strategies as strat, settings
@@ -112,6 +111,7 @@ def universal_test_cast(a, in_dtype, dtype):
 def universal_test_midcast(a, b, c, op1, op2, d1:DType, d2:DType):
   if not isinstance(op1, tuple): op1 = (op1, op1)
   if not isinstance(op2, tuple): op2 = (op2, op2)
+  if op1[0] == operator.mod and b == 0: return
   # lt and max with nan is undefined in tinygrad
   if op1[0] in (operator.lt, Tensor.maximum) and (math.isnan(a) or math.isnan(b)): return
   if op2[0] in (operator.lt, Tensor.maximum) and math.isnan(c): return
@@ -291,6 +291,33 @@ class TestDTypeALU(unittest.TestCase):
   @Context(EMULATED_DTYPES="long")
   def test_emulated_int64(self, a, b, op): universal_test(a, b, dtypes.int64, op)
 
+  def _test_shl(self):
+    for dtype, values, distances in ((dtypes.int64, [-0x1234, 0x80000001, -1, 0x1234, 1], [0, 5, 31, 32, 62]),
+                                     (dtypes.uint64, [0x80000001, 0x80000001, 1, 0xFEDC, 1], [0, 5, 31, 32, 62]),
+                                     (dtypes.int8, [-3, 1, 7, -2, 1], [0, 1, 3, 5, 6]),
+                                     (dtypes.uint16, [3, 1, 0xFF, 7, 1], [0, 1, 7, 12, 15])):
+      with self.subTest(dtype=dtype):
+        result = Tensor(values, dtype=dtype) << Tensor(distances, dtype=dtype)
+        np.testing.assert_equal(result.numpy(), [x << d for x, d in zip(values, distances)])
+
+  def _test_shr(self):
+    for dtype, values, distances in ((dtypes.int64, [-(2**40), -1, -(2**50), -(2**40), 0x123456789ABCDEF], [0, 5, 31, 32, 63]),
+                                     (dtypes.uint64, [0xFEDCBA9876543210] * 5, [0, 5, 31, 32, 63]),
+                                     (dtypes.int8, [-128, -1, 64, -37, 1], [0, 1, 3, 5, 7]),
+                                     (dtypes.uint16, [0xFFFF] * 5, [0, 1, 8, 13, 15])):
+      with self.subTest(dtype=dtype):
+        result = Tensor(values, dtype=dtype) >> Tensor(distances, dtype=dtype)
+        np.testing.assert_equal(result.numpy(), [x >> d for x, d in zip(values, distances)])
+
+  def test_shl(self): self._test_shl()
+  def test_shr(self): self._test_shr()
+
+  @Context(EMULATED_DTYPES="long")
+  def test_emulated_shl(self): self._test_shl()
+
+  @Context(EMULATED_DTYPES="long")
+  def test_emulated_shr(self): self._test_shr()
+
   @given(ht.uint8, strat.sampled_from(integer_unary_operations))
   def test_uint8_unary(self, a, op): universal_test_unary(a, dtypes.uint8, op)
 
@@ -331,12 +358,12 @@ class TestDTypeALU(unittest.TestCase):
   @given(ht.bool, ht.bool, strat.sampled_from(((operator.add, operator.add), (operator.mul, operator.mul))))
   def test_bool(self, a, b, op): universal_test(a, b, dtypes.bool, op)
 
-  @unittest.skipIf(not CI and Device.DEFAULT == "METAL", "broken on local M3")
   @given(ht.int32, ht.int32, ht.float32, strat.sampled_from(integer_binary_operations), strat.sampled_from(binary_operations))
   def test_int32_midcast_float(self, a, b, c, op1, op2): universal_test_midcast(a, b, c, op1, op2, dtypes.int32, dtypes.float32)
 
-  # Metal and CUDA and HIP and NIR behave differently than numpy in CI for overflows
-  skip_overflow = (CI and Device.DEFAULT in {"AMD", "NV", "CUDA"}) or isinstance(Device[Device.DEFAULT].renderer, NIRRenderer)
+  # Metal and (MOCK)CUDA and HIP and NIR behave differently than numpy for overflows
+  skip_overflow = ((DEV.interface.startswith("MOCK") and Device.DEFAULT in {"AMD", "NV", "CUDA"})
+                   or isinstance(Device[Device.DEFAULT].renderer, NIRRenderer))
   @given(strat.floats(width=32, min_value=0, max_value=10.0) if skip_overflow else ht.float32,
          strat.floats(width=32, min_value=0, max_value=10.0) if skip_overflow else ht.float32,
          ht.int32, strat.sampled_from(binary_operations), strat.sampled_from(integer_binary_operations))

@@ -20,13 +20,17 @@ def _make_linear(buffer_lists, copies=None):
   calls = []
   for bufs in buffer_lists:
     is_copy = len(bufs) == 2 and frozenset((id(bufs[0]), id(bufs[1]))) in copy_pairs
-    calls.append(UOp(Ops.CALL, dtypes.void, (UOp(Ops.COPY if is_copy else Ops.SINK), *bufs)))
+    if is_copy:
+      src0 = bufs[0].copy_to_device(bufs[1].device)
+    else:
+      src0 = UOp(Ops.SINK, src=tuple(bufs))
+    calls.append(UOp(Ops.CALL, src=(src0, *bufs)))
   return UOp(Ops.LINEAR, src=tuple(calls))
 
 def _get_arena(buf, linear, result):
   for orig_si, new_si in zip(linear.src, result.src):
     for orig, new in zip(orig_si.src[1:], new_si.src[1:]):
-      if orig is buf and new.op is Ops.BUFFER_VIEW: return new.src[0]
+      if orig is buf and new.op is Ops.SLICE: return new.src[0]
   return None
 
 def check_assign(buffer_lists, copies=None):
@@ -37,8 +41,8 @@ def check_assign(buffer_lists, copies=None):
   replace_map: dict[int, tuple[UOp, int, int]] = {}
   for orig_si, new_si in zip(linear.src, result.src):
     for orig, new in zip(orig_si.src[1:], new_si.src[1:]):
-      if new.op is Ops.BUFFER_VIEW and id(orig) not in replace_map:
-        replace_map[id(orig)] = (new.src[0], new.arg[1] * new.dtype.itemsize, new.arg[0] * new.dtype.itemsize)
+      if new.op is Ops.SLICE and id(orig) not in replace_map:
+        replace_map[id(orig)] = (new.src[0], new.src[1].arg * new.src[0].dtype.itemsize, new.arg * new.dtype.itemsize)
 
   # verify pinned buffers are not planned
   for buf in held_bufs:

@@ -21,7 +21,7 @@ Dragonpilot params_keys.h generator.
 Scans dragonpilot/settings/*.py, AST-walks each module's `ITEMS` literal to
 extract param-storage fields (key, flags, param_type, default), validates them
 against the canonical enum values, and inserts any missing dp_* entries into
-common/params_keys.h. Hermetic: no module is imported.
+openpilot/common/params_keys.h. Hermetic: no module is imported.
 
 The runtime UI panel reads the same ITEMS via dragonpilot/settings/__init__.py.
 """
@@ -31,9 +31,9 @@ from pathlib import Path
 
 SCRIPT_DIR = Path(__file__).parent
 SETTINGS_DIR = SCRIPT_DIR / "dragonpilot" / "settings"
-PARAMS_KEYS_H = SCRIPT_DIR / "common" / "params_keys.h"
+PARAMS_KEYS_H = SCRIPT_DIR / "openpilot" / "common" / "params_keys.h"
 
-# Keep in sync with common/params.h (enum ParamKeyType / enum ParamKeyFlag).
+# Keep in sync with openpilot/common/params.h (enum ParamKeyType / enum ParamKeyFlag).
 VALID_PARAM_TYPES = {"STRING", "BOOL", "INT", "FLOAT", "TIME", "JSON", "BYTES"}
 VALID_FLAGS = {
   "PERSISTENT",
@@ -105,7 +105,7 @@ def _extract_param(dict_node: ast.Dict, source: str) -> dict | None:
 
 
 def extract_params(py_file: Path) -> list[dict]:
-  tree = ast.parse(py_file.read_text())
+  tree = ast.parse(py_file.read_text(encoding="utf-8"))
   items_node = _extract_items_node(tree)
   if items_node is None:
     return []
@@ -141,7 +141,7 @@ def render_param_line(param: dict) -> str:
 
 
 def update_params_keys_h(params: dict[str, dict]) -> None:
-  content = PARAMS_KEYS_H.read_text()
+  content = PARAMS_KEYS_H.read_text(encoding="utf-8")
   existing = set(re.findall(r'\{"(dp_[^"]+)"', content))
 
   new_lines = [render_param_line(p) for k, p in params.items() if k not in existing]
@@ -155,7 +155,7 @@ def update_params_keys_h(params: dict[str, dict]) -> None:
       lines[i:i] = new_lines
       break
 
-  PARAMS_KEYS_H.write_text("\n".join(lines))
+  PARAMS_KEYS_H.write_text("\n".join(lines), encoding="utf-8")
   print(f"params_keys.h: added {len(new_lines)} dp_ entries")
 
 
