@@ -54,7 +54,7 @@ except FileNotFoundError:
 # standard model instead of creating build targets with missing inputs.
 USBGPU = usbgpu_present() and big_model_available
 if USBGPU:
-  usbgpu_tg_flags = f'DEBUG=2 DEV=USB+AMD:LLVM WARP_DEV={tg_backend} FLOAT16=1 JIT_BATCH_SIZE=0 GMMU=0'
+  usbgpu_tg_flags = f'DEBUG=2 DEV=USB+AMD:LLVM WARP_DEV={tg_backend} FLOAT16=1 JIT_BATCH_SIZE=0 GMMU=0 TC_OPT=2'
   # the USB+AMD GPU takes an exclusive flock; serialize all targets that touch it
   usbgpu_lock = File("models/.usb_gpu.lock").abspath
 

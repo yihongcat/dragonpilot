@@ -86,8 +86,8 @@ class CarController(CarControllerBase):
 
           min_power = max(self.steering_power_last - self.CCP.STEERING_POWER_STEP, self.CCP.STEERING_POWER_MIN)
           max_power = min(self.steering_power_last + self.CCP.STEERING_POWER_STEP, self.CCP.STEERING_POWER_MAX)
-          target_power_driver = int(np.interp(CS.out.steeringTorque, [self.CCP.STEER_DRIVER_ALLOWANCE, self.CCP.STEER_DRIVER_MAX],
-                                                                     [self.CCP.STEERING_POWER_MAX, self.CCP.STEERING_POWER_MIN]))
+          target_power_driver = int(np.interp(abs(CS.out.steeringTorque), [self.CCP.STEER_DRIVER_ALLOWANCE, self.CCP.STEER_DRIVER_MAX],
+                                                                          [self.CCP.STEERING_POWER_MAX, self.CCP.STEERING_POWER_MIN]))
           target_power = int(np.interp(CS.out.vEgo, [0., 0.5], [self.CCP.STEERING_POWER_MIN, target_power_driver]))
           steering_power = min(max(target_power, min_power), max_power)
 
@@ -149,7 +149,6 @@ class CarController(CarControllerBase):
           can_sends.extend(mebcan.create_acc_accel_control(self.packer_pt, self.CAN.pt, self.CCP, CS.acc_type, CC.enabled,
                                                            accel, acc_status, acc_hold_type, braking_to_stop,
                                                            CS.out.vEgoRaw * CV.MS_TO_KPH, CS.travel_assist_available))
-          self.accel_last = accel
 
         else:
           stopping = actuators.longControlState == LongCtrlState.stopping
@@ -158,6 +157,8 @@ class CarController(CarControllerBase):
           starting = actuators.longControlState == LongCtrlState.pid and (CS.esp_hold_confirmation or CS.out.vEgo < 0.25)
           can_sends.extend(self.CCS.create_acc_accel_control(self.packer_pt, self.CAN.pt, CS.acc_type, CC.longActive, accel,
                                                              acc_control, stopping, starting, CS.esp_hold_confirmation))
+
+        self.accel_last = accel
 
       #if self.aeb_available:
       #  if self.frame % self.CCP.AEB_CONTROL_STEP == 0:
@@ -185,8 +186,8 @@ class CarController(CarControllerBase):
         if hud_control.leadVisible and self.frame * DT_CTRL > 1.0:
           lead_distance = 8
         can_sends.append(mebcan.create_acc_hud_control(self.packer_pt, self.CAN.pt, self.meb_long_state.acc_status, hud_control.setSpeed * CV.MS_TO_KPH,
-                                                       hud_control.leadVisible, hud_control.leadDistanceBars + 1, show_distance_bars,
-                                                       CS.esp_hold_confirmation, lead_distance, 0, fcw_alert))
+                                                       hud_control.leadVisible, hud_control.leadDistanceBars, show_distance_bars,
+                                                       lead_distance, fcw_alert))
 
       else:
         lead_distance = 0
