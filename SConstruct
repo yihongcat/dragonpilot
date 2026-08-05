@@ -20,6 +20,7 @@ SetOption('num_jobs', max(1, int(os.cpu_count()/(1 if "CI" in os.environ else 2)
 
 AddOption('--ccflags', action='store', type='string', default='', help='pass arbitrary flags over the command line')
 AddOption('--verbose', action='store_true', default=False, help='show full build commands')
+AddOption('--ubsan', action='store_true', default=False, help='turn on undefined behavior sanitizer checks')
 release = not os.path.exists(File('#.gitattributes').abspath) # file absent on release branch, see release_files.py
 AddOption('--minimal',
           action='store_false',
@@ -237,7 +238,8 @@ Export('envCython', 'np_version')
 Export('env', 'arch', 'acados', 'ffmpeg_libs')
 
 # Setup cache dir
-cache_dir = '/data/scons_cache' if arch == "larch64" else '/tmp/scons_cache'
+default_cache_dir = '/data/scons_cache' if arch == "larch64" else '/tmp/scons_cache'
+cache_dir = os.getenv("SCONS_CACHE", default_cache_dir)
 cache_size_limit = 4e9 if "CI" in os.environ else 2e9
 CacheDir(cache_dir)
 Clean(["."], cache_dir)
