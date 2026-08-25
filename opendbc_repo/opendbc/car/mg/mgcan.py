@@ -1,5 +1,5 @@
 def calc_checksum(values):
-  lka_req_toq = values['LKAReqToqHSC2'] + 1024
+  lka_req_toq = values['LKAReqToqHSC2'] + 0x400
   lka_req_toq_sts = values['LKAReqToqStsHSC2']
   lka_req_toq_v = values['LKAReqToqVHSC2']
   lka_alv_rc = values['LKAAlvRCHSC2']
@@ -12,7 +12,6 @@ def calc_checksum(values):
 
 
 def create_lka_steering(packer, counter, apply_torque, active):
-
   values = {
     "LKAReqToqHSC2": apply_torque,
     "LKAReqToqVHSC2": 0,

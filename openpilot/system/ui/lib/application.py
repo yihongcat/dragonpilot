@@ -19,7 +19,7 @@ from typing import NamedTuple
 from importlib.resources import as_file, files
 from openpilot.common.swaglog import cloudlog
 from openpilot.common.hardware import HARDWARE, PC
-from openpilot.system.ui.lib.multilang import multilang
+from openpilot.system.ui.lib.multilang import FONT_FALLBACK_LANGUAGES, TRANSLATIONS_DIR, multilang
 from openpilot.common.realtime import Ratekeeper
 
 _DEFAULT_FPS = int(os.getenv("FPS", {'tici': 20, 'tizi': 20}.get(HARDWARE.get_device_type(), 60)))
@@ -92,6 +92,14 @@ FONT_SCALE = 1.242 if BIG_UI else 1.16
 
 ASSETS_DIR = files("openpilot.selfdrive").joinpath("assets")
 FONT_DIR = ASSETS_DIR.joinpath("fonts")
+EXTRA_FONT_CHARS = "–‑✓×°§•X⚙✕◀▶✔⌫⇧␣○●↳çêüñ–‑✓×°§•€£¥"
+NOTO_FONTS = {
+  "ja": "NotoSansCJKjp-Regular.otf",
+  "ko": "NotoSansCJKkr-Regular.otf",
+  "th": "NotoSansThai-Regular.ttf",
+  "zh-CHS": "NotoSansCJKsc-Regular.otf",
+  "zh-CHT": "NotoSansCJKtc-Regular.otf",
+}
 
 
 class FontWeight(StrEnum):
@@ -102,9 +110,9 @@ class FontWeight(StrEnum):
   UNIFONT = "OpFont-Regular-Labels.fnt"
 
   # Small UI fonts
-  DISPLAY_REGULAR = "Inter-Regular.fnt"
-  ROMAN = "Inter-Regular.fnt"
-  DISPLAY = "Inter-Bold.fnt"
+  DISPLAY_REGULAR = "Inter-Regular.ttf"
+  ROMAN = "Inter-Regular.ttf"
+  DISPLAY = "Inter-Bold.ttf"
 
 _OPFONT_WEIGHT = {
   "Inter-Light.fnt": "Regular",
@@ -224,6 +232,7 @@ class GuiApplication:
     self._set_log_callback()
 
     self._fonts: dict[FontWeight, rl.Font] = {}
+    self._fallback_fonts: dict[str, rl.Font] = {}
     self._width = width if width is not None else GuiApplication._default_width()
     self._height = height if height is not None else GuiApplication._default_height()
     self._active_lang_code: str = ""
@@ -581,6 +590,9 @@ class GuiApplication:
     for font in self._fonts.values():
       rl.unload_font(font)
     self._fonts = {}
+    for font in self._fallback_fonts.values():
+      rl.unload_font(font)
+    self._fallback_fonts = {}
     self._active_lang_code = ""
 
     if self._render_texture is not None:
@@ -718,6 +730,21 @@ class GuiApplication:
         rl.set_texture_filter(font.texture, rl.TextureFilter.TEXTURE_FILTER_BILINEAR)
         self._fonts[font_weight] = font
     return self._fonts[font_weight]
+
+  def fallback_font(self) -> rl.Font:
+    language = multilang.language
+    if language not in self._fallback_fonts:
+      chars = set(map(chr, range(32, 127))) | set(EXTRA_FONT_CHARS)
+      chars.update(TRANSLATIONS_DIR.joinpath(f"app_{language}.po").read_text(encoding="utf-8"))
+      codepoints = sorted(map(ord, chars))
+      codepoint_buffer = rl.ffi.new("int[]", codepoints)
+      with as_file(FONT_DIR) as fspath:
+        font = rl.load_font_ex((fspath / NOTO_FONTS[language]).as_posix(), 48,
+                               rl.ffi.cast("int *", codepoint_buffer), len(codepoints))
+      rl.gen_texture_mipmaps(font.texture)
+      rl.set_texture_filter(font.texture, rl.TextureFilter.TEXTURE_FILTER_TRILINEAR)
+      self._fallback_fonts[language] = font
+    return self._fallback_fonts[language]
 
   @property
   def width(self):

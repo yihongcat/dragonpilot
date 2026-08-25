@@ -22,7 +22,7 @@ dependencies = [
   "aiohttp",      # dragonpilot dashy web server
 
   # core
-  "scons",
+  "scons==4.10.1",  # 4.11 removed the qt3 tool still used to build Cabana
   "pycapnp==2.1.0",  # 2.2 introduces a memory leak due to cyclic references
   "numpy >=2.0",
 
@@ -52,7 +52,6 @@ dependencies = [
 
   # ui
   "comma-deps-raylib",
-  "qrcode",
 ]
 
 [project.optional-dependencies]

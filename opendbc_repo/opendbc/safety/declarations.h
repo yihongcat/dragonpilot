@@ -34,7 +34,7 @@
 #define SAFETY_PSA 31U
 #define SAFETY_RIVIAN 33U
 #define SAFETY_VOLKSWAGEN_MEB 34U
-#define SAFETY_MG 35U
+#define SAFETY_MG 38U
 
 #define GET_BIT(msg, b) ((bool)!!(((msg)->data[((b) / 8U)] >> ((b) % 8U)) & 0x1U))
 #define GET_FLAG(value, mask) (((value) & (mask)) == (mask))
@@ -219,19 +219,10 @@ typedef void (*rx_hook)(const CANPacket_t *msg);
 typedef bool (*tx_hook)(const CANPacket_t *msg);  // returns true if the message is allowed
 typedef bool (*fwd_hook)(int bus_num, int addr);      // returns true if the message should be blocked from forwarding
 
-// dp - tx_ext result struct for extended TX whitelist
-typedef struct {
-  bool allowed;       // if true, message is allowed to be sent
-  bool check_relay;   // if true, trigger relay malfunction if this addr is received
-} TxExtResult;
-typedef TxExtResult (*tx_ext_hook)(const CANPacket_t *msg);
-
 typedef struct {
   safety_hook_init init;
   rx_hook rx;
-  rx_hook rx_ext;  // dp - optional hook for ALL valid messages (not just whitelisted)
   tx_hook tx;
-  tx_ext_hook tx_ext;  // dp - optional hook for messages NOT in base TX whitelist
   fwd_hook fwd;
   get_checksum_t get_checksum;
   compute_checksum_t compute_checksum;
@@ -246,9 +237,7 @@ void update_sample(struct sample_t *sample, int sample_new);
 bool get_longitudinal_allowed(void);
 int ROUND(float val);
 void gen_crc_lookup_table_8(uint8_t poly, uint8_t crc_lut[]);
-#ifdef CANFD
 void gen_crc_lookup_table_16(uint16_t poly, uint16_t crc_lut[]);
-#endif
 bool steer_torque_cmd_checks(int desired_torque, int steer_req, const TorqueSteeringLimits limits);
 bool steer_angle_cmd_checks(int desired_angle, bool steer_control_enabled, const AngleSteeringLimits limits);
 bool steer_angle_cmd_checks_vm(int desired_angle, bool steer_control_enabled, const AngleSteeringLimits limits,
@@ -257,7 +246,6 @@ bool steer_curvature_cmd_checks(int desired_curvature, int steer_power, bool ste
 bool longitudinal_accel_checks(int desired_accel, const LongitudinalLimits limits);
 bool longitudinal_speed_checks(int desired_speed, const LongitudinalLimits limits);
 bool longitudinal_gas_checks(int desired_gas, const LongitudinalLimits limits);
-bool longitudinal_transmission_rpm_checks(int desired_transmission_rpm, const LongitudinalLimits limits);
 bool longitudinal_brake_checks(int desired_brake, const LongitudinalLimits limits);
 void pcm_cruise_check(bool cruise_engaged);
 void speed_mismatch_check(const float speed_2);
@@ -332,12 +320,7 @@ extern CurvatureSteeringState curvature_state;
 // This flag allows AEB to be commanded from openpilot.
 #define ALT_EXP_ALLOW_AEB 16
 
-#define ALT_EXP_ALKA 1024
-
 extern int alternative_experience;
-
-extern bool alka_allowed;
-extern bool lkas_on;
 
 // time since safety mode has been changed
 extern uint32_t safety_mode_cnt;
@@ -379,3 +362,4 @@ extern const safety_hooks volkswagen_meb_hooks;
 extern const safety_hooks volkswagen_pq_hooks;
 extern const safety_hooks rivian_hooks;
 extern const safety_hooks psa_hooks;
+extern const safety_hooks mg_hooks;

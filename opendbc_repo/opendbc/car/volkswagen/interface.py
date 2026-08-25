@@ -14,7 +14,7 @@ class CarInterface(CarInterfaceBase):
                     structs.CarState.GearShifter.manumatic)
 
   @staticmethod
-  def _get_params(ret: structs.CarParams, candidate: CAR, fingerprint, car_fw, alpha_long, is_release, dp_params, docs) -> structs.CarParams:
+  def _get_params(ret: structs.CarParams, candidate: CAR, fingerprint, car_fw, alpha_long, is_release, docs) -> structs.CarParams:
     ret.brand = "volkswagen"
     ret.radarUnavailable = Bus.radar not in DBC[candidate]
 
@@ -33,13 +33,7 @@ class CarInterface(CarInterfaceBase):
       else:
         ret.networkLocation = NetworkLocation.fwdCamera
 
-      # The PQ port is in dashcam-only mode due to a fixed six-minute maximum timer on HCA steering. An unsupported
-      # EPS flash update to work around this timer, and enable steering down to zero, is available from:
-      #   https://github.com/pd0wm/pq-flasher
-      # It is documented in a four-part blog series:
-      #   https://blog.willemmelching.nl/carhacking/2022/01/02/vw-part1/
-      # Panda ALLOW_DEBUG firmware required.
-      # ret.dashcamOnly = is_release  # Release support needs HCA timeout fix, safety validation
+      ret.dashcamOnly = is_release  # Release support needs HCA timeout fix, safety validation
 
     elif ret.flags & VolkswagenFlags.MLB:
       # Set global MLB parameters
@@ -124,8 +118,6 @@ class CarInterface(CarInterfaceBase):
     if ret.flags & VolkswagenFlags.MEB:
       ret.openpilotLongitudinalControl = True
       ret.longitudinalActuatorDelay = 0.3
-      ret.longitudinalTuning.kiBP = [0., 30.]
-      ret.longitudinalTuning.kiV = [0.4, 0.]
     else:
       ret.alphaLongitudinalAvailable = ret.networkLocation == NetworkLocation.gateway or docs
       if alpha_long:
@@ -147,11 +139,5 @@ class CarInterface(CarInterfaceBase):
     if CAN.pt >= 4:
       safety_configs.insert(0, get_safety_config(structs.CarParams.SafetyModel.noOutput))
     ret.safetyConfigs = safety_configs
-
-    if dp_params & structs.DPFlags.VagA0SnG:
-      ret.flags |= VolkswagenFlags.A0SnG.value
-
-    if dp_params & structs.DPFlags.VagAvoidEPSLockout:
-      ret.flags |= VolkswagenFlags.AVOID_EPS_LOCKOUT.value
 
     return ret
