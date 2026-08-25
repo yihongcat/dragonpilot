@@ -320,7 +320,13 @@ extern CurvatureSteeringState curvature_state;
 // This flag allows AEB to be commanded from openpilot.
 #define ALT_EXP_ALLOW_AEB 16
 
+// dragonpilot: keep lateral control available while stock ACC is disengaged.
+#define ALT_EXP_ALKA 1024
+
 extern int alternative_experience;
+
+extern bool alka_allowed;
+extern bool lkas_on;
 
 // time since safety mode has been changed
 extern uint32_t safety_mode_cnt;
