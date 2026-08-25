@@ -37,6 +37,12 @@
 
   基於活躍的社群與功能創新，`dragonpilot` 曾一度成長為 comma ai 官方認證的第一大 openpilot 分支，這份榮耀屬於每一位參與者。
 
+* Join the [community Discord](https://discord.comma.ai)
+* Check out [the contributing docs](docs/CONTRIBUTING.md)
+* Check out the [openpilot tools](openpilot/tools/)
+* Code documentation lives at https://docs.comma.ai
+* Information about running openpilot lives on the [community wiki](https://github.com/commaai/openpilot/wiki)
+
 ## **🧑‍💻 設計理念 - 少即是多 (Less is More)**
 
 隨著 openpilot 的 AI 模型日益強大，許多過去需要手動微調的功能，現在都已能透過更先進的模型來實現。因此，我們現在的開發重心回歸到 **「最小化修改」(minimal changes)** 的核心原則上。

@@ -16,7 +16,7 @@
 #include "common/swaglog.h"
 #include "common/timing.h"
 #include "common/util.h"
-#include "system/hardware/hw.h"
+#include "common/hardware/hw.h"
 
 // -- Multi-panda conventions --
 // Ordering:
@@ -299,22 +299,13 @@ void send_peripheral_state(Panda *panda, PubMaster *pm) {
   auto ps = evt.initPeripheralState();
   ps.setPandaType(panda->hw_type);
 
-  double read_time = millis_since_boot();
-  ps.setVoltage(Hardware::get_voltage());
-  ps.setCurrent(Hardware::get_current());
-  read_time = millis_since_boot() - read_time;
-  if (read_time > 50) {
-    LOGW("reading hwmon took %lfms", read_time);
-  }
-
-  // fall back to panda's voltage and current measurement
-  if (ps.getVoltage() == 0 && ps.getCurrent() == 0) {
-    auto health_opt = panda->get_state();
-    if (health_opt) {
-      health_t health = *health_opt;
-      ps.setVoltage(health.voltage_pkt);
-      ps.setCurrent(health.current_pkt);
-    }
+  // HardwareTici no longer exposes C++ hwmon helpers. Use the Panda health
+  // packet, which is also the authoritative fallback used by upstream pandad.
+  auto health_opt = panda->get_state();
+  if (health_opt) {
+    health_t health = *health_opt;
+    ps.setVoltage(health.voltage_pkt);
+    ps.setCurrent(health.current_pkt);
   }
 
   uint16_t fan_speed_rpm = panda->get_fan_speed();
@@ -367,7 +358,7 @@ void process_panda_state(std::vector<Panda *> &pandas, PubMaster *pm, bool engag
 
 void process_peripheral_state(Panda *panda, PubMaster *pm, bool no_fan_control) {
   static Params params;
-  static SubMaster sm({"deviceState", "driverCameraState"});
+  static SubMaster sm({"deviceState", "cabinCameraState"});
 
   static uint64_t last_driver_camera_t = 0;
   static uint16_t prev_fan_speed = 999;
@@ -391,17 +382,17 @@ void process_peripheral_state(Panda *panda, PubMaster *pm, bool no_fan_control) 
       }
     }
 
-    if (sm.updated("driverCameraState")) {
-      auto event = sm["driverCameraState"];
-      int cur_integ_lines = event.getDriverCameraState().getIntegLines();
+    if (sm.updated("cabinCameraState")) {
+      auto event = sm["cabinCameraState"];
+      int cur_integ_lines = event.getCabinCameraState().getIntegLines();
 
       // reset the filter when camerad restarts
-      if (event.getDriverCameraState().getFrameId() < prev_frame_id) {
+      if (event.getCabinCameraState().getFrameId() < prev_frame_id) {
         integ_lines_filter.reset(0);
         integ_lines_filter_driver_view.reset(0);
         driver_view = params.getBool("IsDriverViewEnabled");
       }
-      prev_frame_id = event.getDriverCameraState().getFrameId();
+      prev_frame_id = event.getCabinCameraState().getFrameId();
 
       cur_integ_lines = (driver_view ? integ_lines_filter_driver_view : integ_lines_filter).update(cur_integ_lines);
       last_driver_camera_t = event.getLogMonoTime();

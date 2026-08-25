@@ -1,4 +1,4 @@
-import time, math, unittest, functools, platform, warnings
+import time, math, unittest, functools, platform, warnings, sys
 import numpy as np
 from typing import List, Callable
 import torch
@@ -7,7 +7,6 @@ from tinygrad import Tensor, Device, dtypes
 from tinygrad.tensor import _to_np_dtype
 from tinygrad.renderer.cstyle import QCOMCLRenderer
 from tinygrad.renderer.nir import NIRRenderer
-from test.helpers import CI
 
 TINY_BACKEND = getenv("TINY_BACKEND")
 if TINY_BACKEND:
@@ -74,7 +73,7 @@ def helper_test_op(shps, torch_fxn, tinygrad_fxn=None, atol=1e-6, rtol=1e-3, gra
     for i, (t, torch_grad) in enumerate(zip(tiny_grads, torch_grads)):
       compare(f"backward pass tensor {i}", t.numpy(), torch_grad.detach().cpu().numpy(), atol=grad_atol, rtol=grad_rtol)
 
-  if not CI:
+  if sys.stdout.isatty():
     print("\ntesting %40r   torch/tinygrad fp: %.2f / %.2f ms  bp: %.2f / %.2f ms " % \
           (shps, torch_fp*1000, tinygrad_fp*1000, torch_fbp*1000, tinygrad_fbp*1000), end="")
 
@@ -103,7 +102,7 @@ class TestOps(unittest.TestCase):
     with self.assertRaises(expected) as tinygrad_cm:
       tinygrad_fxn(*tst)
     if exact: self.assertEqual(str(torch_cm.exception), str(tinygrad_cm.exception))
-    if not CI: print("\ntesting %40r   torch/tinygrad exception: %s / %s" % (shps, torch_cm.exception, tinygrad_cm.exception), end="")
+    if sys.stdout.isatty(): print("\ntesting %40r   torch/tinygrad exception: %s / %s" % (shps, torch_cm.exception, tinygrad_cm.exception), end="")
 
   def test_full_like(self):
     a = Tensor([[1,2,3],[4,5,6]], dtype=dtypes.float32)
@@ -849,6 +848,8 @@ class TestOps(unittest.TestCase):
     helper_test_op([], lambda: tor << 0, lambda: (ten << 0).cast(dtypes.int32), forward_only=True)
     helper_test_op([], lambda: tor << 2, lambda: (ten << 2).cast(dtypes.int32), forward_only=True)
     helper_test_op([], lambda: tor << 31, lambda: (ten << 31).cast(dtypes.int32), forward_only=True)
+    helper_test_op([], lambda: tor << torch.tensor([0,2,4]).int(),
+                   lambda: (ten << Tensor([0,2,4], dtype=dtypes.uint32)).cast(dtypes.int32), forward_only=True)
     helper_test_op([], lambda: tor.__lshift__(2), lambda: ten.__lshift__(2).cast(dtypes.int32), forward_only=True)
     helper_test_op([], lambda: tor.bitwise_left_shift(2), lambda: ten.lshift(2).cast(dtypes.int32), forward_only=True)
 
@@ -860,6 +861,8 @@ class TestOps(unittest.TestCase):
     helper_test_op([], lambda: tor >> 0, lambda: (ten >> 0).cast(dtypes.int32), forward_only=True)
     helper_test_op([], lambda: tor >> 2, lambda: (ten >> 2).cast(dtypes.int32), forward_only=True)
     helper_test_op([], lambda: tor >> 31, lambda: (ten >> 31).cast(dtypes.int32), forward_only=True)
+    helper_test_op([], lambda: tor >> torch.tensor([0,2,4]).int(),
+                   lambda: (ten >> Tensor([0,2,4], dtype=dtypes.uint32)).cast(dtypes.int32), forward_only=True)
     helper_test_op([], lambda: tor.__rshift__(2), lambda: ten.__rshift__(2).cast(dtypes.int32), forward_only=True)
     helper_test_op([], lambda: tor.bitwise_right_shift(2), lambda: ten.rshift(2).cast(dtypes.int32), forward_only=True)
 
@@ -871,6 +874,7 @@ class TestOps(unittest.TestCase):
     helper_test_op([], lambda: tor << 2, lambda: ten << 2, forward_only=True)
     helper_test_op([], lambda: tor << 8, lambda: ten << 8, forward_only=True)
     helper_test_op([], lambda: tor << 31, lambda: ten << 31, forward_only=True)
+    helper_test_op([], lambda: tor << torch.tensor([0,2,8,31]).int(), lambda: ten << Tensor([0,2,8,31], dtype=dtypes.int), forward_only=True)
 
   def test_rshift_signed(self):
     data = [[-1, -3, 1, 7], [0, -2147483648, 2147483647, -1]]
@@ -880,6 +884,7 @@ class TestOps(unittest.TestCase):
     helper_test_op([], lambda: tor >> 2, lambda: ten >> 2, forward_only=True)
     helper_test_op([], lambda: tor >> 8, lambda: ten >> 8, forward_only=True)
     helper_test_op([], lambda: tor >> 31, lambda: ten >> 31, forward_only=True)
+    helper_test_op([], lambda: tor >> torch.tensor([0,2,8,31]).int(), lambda: ten >> Tensor([0,2,8,31], dtype=dtypes.int), forward_only=True)
 
   def test_idiv_shift_rewrite_negative(self):
     a = Tensor(-5).div(2, rounding_mode="trunc").item()
@@ -1449,9 +1454,8 @@ class TestOps(unittest.TestCase):
                                                                          np.arange(64,128,dtype=np.float32).reshape(8,8)])
   def test_small_gemm_eye(self):
     helper_test_op(None, lambda x,y: x.matmul(y), lambda x,y: x@y, vals=[np.eye(8).astype(np.float32), np.eye(8).astype(np.float32)])
-  @unittest.skipIf(CI and Device.DEFAULT in ["NV", "CL", "CUDA"] or (Device.DEFAULT == "CPU" and DEV.renderer == "LLVM") or IMAGE
-  or (Device.DEFAULT == "WEBGPU" and platform.system() == "Windows"), "not supported on these in CI/IMAGE")
-  @unittest.skipIf(Device.DEFAULT == "QCOM", "not precise enough")
+  @unittest.skipUnless(dtypes.half in Device[Device.DEFAULT].renderer.supported_dtypes(), "not precise enough when emulating")
+  @unittest.skipIf(IMAGE>0, "image does math in float32")
   def test_gemm_fp16(self):
     helper_test_op([(64,64), (64,64)], lambda x,y: x.half().matmul(y.half()), atol=5e-3, rtol=5e-3, grad_atol=5e-3, grad_rtol=5e-3)
   def test_gemm(self):
@@ -1603,6 +1607,12 @@ class TestOps(unittest.TestCase):
       for b in [math.inf, -math.inf, math.nan, 0.0]:
         helper_test_op(None, lambda x,y: x.isclose(y), vals=[[a], [b]], forward_only=True)
         helper_test_op(None, lambda x,y: x.isclose(y, equal_nan=True), vals=[[a], [b]], forward_only=True)
+
+  def test_isclose_scalar(self):
+    # torch needs a tensor
+    helper_test_op([(3, 4, 5, 6)], lambda x: x.isclose(torch.tensor(1.0)), lambda x: x.isclose(1.0), forward_only=True)
+    helper_test_op(None, lambda x: x.isclose(torch.tensor(1.0)), lambda x: x.isclose(1.0),
+                   vals=[[1.0, 1.0 + 1e-7, 2.0, math.inf, -math.inf, math.nan]], forward_only=True)
 
   def test_mean(self):
     helper_test_op([(3,4,5,6)], lambda x: x.mean())
@@ -1992,9 +2002,7 @@ class TestOps(unittest.TestCase):
     self.helper_test_exception([(1,1,5,5)],
                                 lambda x: torch.nn.functional.pad(x, (3,6,0,0), mode="circular"), lambda x: x.pad((3,6,0,0), mode="circular"),
                                 expected=(RuntimeError, ValueError))
-    with self.assertRaises(NotImplementedError):
-      # negative pads with circular pads is not supported
-      Tensor.randn(1,1,5,5).pad((3,-5,1,-5), mode="circular")
+    helper_test_op([(1,1,5,5)], lambda x: torch.nn.functional.pad(x, (1,-2,2,-1), mode="circular"), lambda x: x.pad((1,-2,2,-1), mode="circular"))
 
   def test_pad_reshape(self):
     helper_test_op([(1, 2)],

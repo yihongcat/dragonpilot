@@ -1,0 +1,8 @@
+# The merged DP tree materializes assets that are submodules in upstream OP.
+# Track only the four files that are actually stored as LFS pointers here.
+docs/assets/favicon.svg filter=lfs diff=lfs merge=lfs -text
+openpilot/selfdrive/assets/icons/fire.png filter=lfs diff=lfs merge=lfs -text
+openpilot/selfdrive/assets/icons/yellow_warning.png filter=lfs diff=lfs merge=lfs -text
+openpilot/selfdrive/assets/icons_mici/settings/software.png filter=lfs diff=lfs merge=lfs -text
+openpilot/selfdrive/modeld/models/dmonitoring_model.onnx filter=lfs diff=lfs merge=lfs -text
+openpilot/selfdrive/modeld/models/driving_supercombo.onnx filter=lfs diff=lfs merge=lfs -text

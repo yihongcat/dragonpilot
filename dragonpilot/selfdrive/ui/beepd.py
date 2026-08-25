@@ -19,11 +19,11 @@ THE SOFTWARE IS PROVIDED “AS IS”, WITHOUT WARRANTY OF ANY KIND, EXPRESS OR I
 
 import subprocess
 import time
-from cereal import car, messaging
+from openpilot.cereal import log, messaging
 from openpilot.common.realtime import Ratekeeper
 import threading
 
-AudibleAlert = car.CarControl.HUDControl.AudibleAlert
+AudibleAlert = log.SelfdriveState.AudibleAlert
 
 class Beepd:
   def __init__(self, test=False):

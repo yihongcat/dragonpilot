@@ -42,10 +42,6 @@ BO_ 175 GW_HSC2_HCU_FrP00: 8 GW
  SG_ EPTBrkPdlDscrtInptStsVHSC2 : 16|1@0+ (1,0) [0|1] ""  FVCM
  SG_ EPTStCmdOn_h1HSC2 : 17|1@0+ (1,0) [0|1] ""  FVCM
 
-BO_ 201 Tester_HSC2_ECM_FrP00: 8 Tester
- SG_ AccelActuPosHSC2 : 39|8@0+ (0.392157,0) [0|100] "%"  FVCM
- SG_ AccelActuPosVHSC2 : 31|1@0+ (1,0) [0|1] ""  FVCM
-
 BO_ 251 GW_HSC2_ECM_FrP27: 8 GW
  SG_ ACCStsHSC2 : 2|1@0+ (1,0) [0|1] "" XXX
  SG_ SpdAstMdECMHSC2 : 52|2@0+ (1,0) [0|3] ""  FVCM
@@ -138,11 +134,6 @@ BO_ 509 FVCM_HSC2_FrP03: 8 FVCM
  SG_ LKASysFltStsHSC2 : 39|3@0+ (1,0) [0|7] ""  GW,EPS
  SG_ LKASysStsHSC2 : 34|3@0+ (1,0) [0|7] ""  GW,EPS
 
-BO_ 516 RDA_HSC1_P02: 8 RDA
- SG_ LBSDAndLCAWrnng_HS : 7|2@0+ (1,0) [0|3] ""  FVCM
- SG_ RBSDAndLCAWrnng_HS : 5|2@0+ (1,0) [0|3] ""  FVCM
- SG_ RDASysSta_HS : 23|5@0+ (1,0) [0|31] ""  FVCM
-
 BO_ 532 SCS_HSC2_FrP09: 6 SCSABS
  SG_ BrkPdlDrvrAppdPrsHSC2 : 15|8@0+ (75,0) [0|19125] "kPa"  FVCM
  SG_ BrkPdlDrvrAppdPrsAlvRCHSC2 : 2|2@0+ (1,0) [0|3] ""  FVCM
@@ -226,22 +217,26 @@ BO_ 1130 GW_HSC2_BCM_FrP04: 8 GW
  SG_ BlinkerBulbRight : 38|1@0+ (1,0) [0|1] ""  XXX
  SG_ BlinkerLeft : 59|1@0+ (1,0) [0|1] ""  XXX
  SG_ BlinkerRight : 60|1@0+ (1,0) [0|1] ""  XXX
+ SG_ BntOpenStsHSC2 : 47|2@0+ (1,0) [0|3] ""  FVCM
  SG_ DipdBeamLghtOnHSC2 : 13|1@0+ (1,0) [0|1] ""  FVCM
  SG_ DircnIndLampSwStsHSC2 : 3|2@0+ (1,0) [0|3] ""  FVCM
+ SG_ DrvrDoorOpenStsHSC2 : 1|2@0+ (1,0) [0|3] ""  FVCM
  SG_ DspMeasSysHSC2 : 44|1@0+ (1,0) [0|1] ""  FVCM
  SG_ FrtFogLghtOnHSC2 : 14|1@0+ (1,0) [0|1] ""  FVCM
+ SG_ FrtPsngDoorOpenStsHSC2 : 43|2@0+ (1,0) [0|3] ""  FVCM
  SG_ FrtWiperParkPosAHSC2 : 52|1@0+ (1,0) [0|1] ""  FVCM
  SG_ FrtWshrPumpAHSC2 : 55|1@0+ (1,0) [0|1] ""  FVCM
+ SG_ KeyDetIndxHSC2 : 51|3@0+ (1,0) [0|7] ""  FVCM
  SG_ LDircnIndLghtFHSC2 : 10|1@0+ (1,0) [0|1] ""  FVCM
  SG_ LDircnIOHSC2 : 11|1@0+ (1,0) [0|1] ""  FVCM
+ SG_ LdspcOpenStsHSC2 : 7|2@0+ (1,0) [0|3] ""  FVCM
  SG_ MainBeamLghtOnHSC2 : 15|1@0+ (1,0) [0|1] ""  FVCM
  SG_ RDircnIndLghtFHSC2 : 48|1@0+ (1,0) [0|1] ""  FVCM
  SG_ RDircnIOHSC2 : 9|1@0+ (1,0) [0|1] ""  FVCM
+ SG_ RLDoorOpenStsHSC2 : 41|2@0+ (1,0) [0|3] ""  FVCM
+ SG_ RRDoorOpenStsHSC2 : 5|2@0+ (1,0) [0|3] ""  FVCM
  SG_ RrFogLghtOnHSC2 : 8|1@0+ (1,0) [0|1] ""  FVCM
  SG_ VehSideLghtStsHSC2 : 57|2@0+ (1,0) [0|3] ""  FVCM
- SG_ DrvrDoorOpenSts_H1_Safety : 47|2@0+ (1,0) [0|3] ""  xxx
- SG_ FrtPsngDoorOpenSts_H1_Safety : 43|2@0+ (1,0) [0|3] ""  xxx
- SG_ RRDoorOpenSts_Safety : 41|2@0+ (1,0) [0|3] ""  xxx
 
 VAL_ 355 AirbagDplInvsnHSC2 1 "No Airbag Deployed" 0 "Airbag Deployed";
 VAL_ 355 AirbagDplHSC2 1 "True" 0 "False";
@@ -313,10 +308,10 @@ VAL_ 851 VehSpdAvgNonDrvnVHSC2 1 "Invalid" 0 "Valid" ;
 VAL_ 1130 BntOpenStsHSC2 3 "Reserved" 2 "Bonnet Switch Disconnect" 1 "Bonnet Open" 0 "Bonnet Closed" ;
 VAL_ 1130 DipdBeamLghtOnHSC2 1 "True" 0 "False" ;
 VAL_ 1130 DircnIndLampSwStsHSC2 3 "reserve" 2 "Right on" 1 "Left on" 0 "off" ;
-VAL_ 1130 DrvrDoorOpenStsHSC2 3 "Driver Door Full Open" 2 "Driver Door Ajar" 1 "Driver Door Open(For latch switch can't detect door ajar status)" 0 "Driver Door Closed" ;
+VAL_ 1130 DrvrDoorOpenStsHSC2 3 "Driver Door Full Open" 2 "Driver Door Ajar" 1 "Driver Door Open" 0 "Driver Door Closed" ;
 VAL_ 1130 DspMeasSysHSC2 1 "mph" 0 "kph" ;
 VAL_ 1130 FrtFogLghtOnHSC2 1 "True" 0 "False" ;
-VAL_ 1130 FrtPsngDoorOpenStsHSC2 3 "Front Passenger Door Full Open" 2 "Front Passenger Door Ajar" 1 "Front Passenger Open(latch switch cann¡®t detect door ajar statu" 0 "Front Passenger Door Closed" ;
+VAL_ 1130 FrtPsngDoorOpenStsHSC2 3 "Front Passenger Door Full Open" 2 "Front Passenger Door Ajar" 1 "Front Passenger Door Open" 0 "Front Passenger Door Closed" ;
 VAL_ 1130 FrtWiperParkPosAHSC2 1 "True" 0 "False" ;
 VAL_ 1130 FrtWshrPumpAHSC2 1 "True" 0 "False" ;
 VAL_ 1130 KeyDetIndxHSC2 7 "error" 6 "key 6 is detected" 5 "key 5 is detected" 4 "key 4 is detected" 3 "key 3 is detected" 2 "key 2 is detected" 1 "key 1 is detected" 0 "non key is detected" ;
@@ -326,7 +321,7 @@ VAL_ 1130 LdspcOpenStsHSC2 3 "Reserved" 2 "Reserved" 1 "Load Space Open" 0 "Load
 VAL_ 1130 MainBeamLghtOnHSC2 1 "True" 0 "False" ;
 VAL_ 1130 RDircnIndLghtFHSC2 1 "True" 0 "False" ;
 VAL_ 1130 RDircnIOHSC2 1 "True" 0 "False" ;
-VAL_ 1130 RLDoorOpenStsHSC2 3 "Rear Left Door Full Open" 2 "Rear Left Door Ajar" 1 "Rear Left Door Open(latch switch cann't detect door ajar status" 0 "Rear Left Door Closed" ;
-VAL_ 1130 RRDoorOpenStsHSC2 3 "Rear Right Door Full Open" 2 "Rear Right Door Ajar" 1 "Rear Right Door Open(latch switch cann't detect door ajar status" 0 "Rear Right Door Closed" ;
+VAL_ 1130 RLDoorOpenStsHSC2 3 "Rear Left Door Full Open" 2 "Rear Left Door Ajar" 1 "Rear Left Door Open" 0 "Rear Left Door Closed" ;
+VAL_ 1130 RRDoorOpenStsHSC2 3 "Rear Right Door Full Open" 2 "Rear Right Door Ajar" 1 "Rear Right Door Open" 0 "Rear Right Door Closed" ;
 VAL_ 1130 RrFogLghtOnHSC2 1 "True" 0 "False" ;
 VAL_ 1130 VehSideLghtStsHSC2 3 "All side light and license plate light on" 2 "Right side light on only" 1 "Left side light on only" 0 "No side light on " ;

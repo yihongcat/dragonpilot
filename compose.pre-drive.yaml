@@ -1,0 +1,31 @@
+name: dragonpilot-pre-drive
+
+services:
+  pre-drive:
+    build:
+      context: .
+      dockerfile: docker/pre-drive.Dockerfile
+    image: dragonpilot-pre-drive:local
+    working_dir: /workspace
+    environment:
+      CI: "1"
+      UV_PROJECT_ENVIRONMENT: /opt/openpilot-venv
+      UV_CACHE_DIR: /opt/uv-cache
+      UV_LINK_MODE: copy
+      UV_PYTHON_INSTALL_DIR: /opt/uv-python
+      PRE_DRIVE_SKIP_INTEGRITY: "1"
+      SCONS_CACHE: /opt/scons-cache
+    volumes:
+      - .:/source:ro
+      - pre-drive-workspace:/workspace
+      - pre-drive-venv:/opt/openpilot-venv
+      - pre-drive-uv-cache:/opt/uv-cache
+      - pre-drive-uv-python:/opt/uv-python
+      - pre-drive-scons-cache:/opt/scons-cache
+
+volumes:
+  pre-drive-workspace:
+  pre-drive-venv:
+  pre-drive-uv-cache:
+  pre-drive-uv-python:
+  pre-drive-scons-cache:

@@ -1,3 +1,25 @@
+dragonpilot 0.11.2 r2 (2026-07-28)
+=======================
+* ✅ 从远端 `install` 旧版（来源 `test/no-driver-cam-fix@88d1b27`）整合至 `merge/comma-master`
+* ✅ 同步 commaai/openpilot `master@02b6cef`，适配新版 `openpilot/` 目录结构、进程入口、界面资源与 AGNOS 18.7
+* ✅ 保留 LITE、无驾驶员摄像头、Dashy、自定义纵向控制、车型扩展及原有 dragonpilot 设置
+* ✨ 弯道速度控制增加提前减速度前馈与 jerk 限制，在进入弯道前更平顺地开始减速，并在退出限制时平顺释放
+* 🛠️ 适配新版雷达前车 `present` 状态，修复 Dashy、ACM 前车识别及紧急条件判断
+* 🛠️ 修复 Toyota NO_DSU、CAN FD / Volkswagen safety、Panda 供电状态、manager 路径与 UI 资源兼容问题
+* 🛠️ 恢复并收窄 Git LFS 规则，确保驾驶模型及必要资源可随安装分支正常检出
+* 🧪 新增可重复的 Docker 上车前检查，覆盖静态检查、完整构建、路线回放与 CPU-only MetaDrive
+* ⚠️ 本次更新包含大规模目录迁移及 AGNOS 更新；请在车辆熄火、供电和网络稳定时更新，等待系统完成下载、构建和重启，UI 稳定后再使用
+* ⚠️ 发布到 `install` 前仍需完成完整上车前门禁；Lebowski 1.75 GB USB-GPU 模型仍未内置，无外置 GPU 的设备继续使用标准驾驶模型
+
+dragonpilot 0.11.2 r1 (2026-07-23)
+=======================
+* ✅ 基于 test/no-driver-cam-fix 合并 commaai/openpilot 最新 master
+* ✅ 同步新版 openpilot 系统架构、驾驶模型流程、界面与进程配置
+* ✅ 沿用原 0.11.1 已具备的官方世界模型驾驶模型能力
+* ✅ 保留 dragonpilot 功能：LITE、无驾驶员摄像头、Dashy、自定义纵向控制及车型扩展
+* ⚠️ 官方新增 Lebowski 强化学习大模型仅适用于兼容 USB-GPU；本版本未内置 1.75 GB 模型，无外置 GPU 的设备继续使用标准驾驶模型
+* ⚠️ 本版本为大规模整合测试版，请先离线检查并验证车型功能后再日常使用
+
 dragonpilot 0.11.1 r1 (2026-06-22)
 =======================
 * ✅ openpilot 0.11.1 (devel-staging) (2026-06-05)

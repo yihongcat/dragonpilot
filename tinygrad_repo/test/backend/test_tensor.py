@@ -1,7 +1,7 @@
 import numpy as np
 import torch
 import unittest, copy, mmap, random, math, array
-from tinygrad import Tensor, Device, dtypes, nn
+from tinygrad import Tensor, Device, dtypes, nn, Context
 from tinygrad.helpers import getenv, temp, mv_address
 from extra.gradcheck import numerical_jacobian, jacobian, gradcheck
 from hypothesis import given, settings, strategies as strat
@@ -203,7 +203,7 @@ class TestTinygrad(unittest.TestCase):
       np.testing.assert_allclose(x, y, atol=1e-5)
 
   def test_dropout(self):
-    with Tensor.train():
+    with Context(TRAINING=1):
       n, rate = 1_000_000, 0.1
       w = Tensor.ones(n).dropout(rate)
       non_zeros = np.count_nonzero(w.numpy())
@@ -551,7 +551,7 @@ class TestTinygrad(unittest.TestCase):
       Tensor.zeros(2, 2).realize()
 
   def test_shrink(self):
-    t = Tensor.arange(32).contiguous().realize()
+    t = Tensor.arange(32).clone().realize()
     self.assertListEqual(t[16:20].tolist(), [16,17,18,19])
     self.assertListEqual(t.shrink_to(16).tolist(), list(range(16)))
     t = t.reshape(4, 8).contiguous().realize()
@@ -592,7 +592,7 @@ class TestMoveTensor(unittest.TestCase):
     assert x is y
 
   def test_to_grad(self):
-    x = Tensor.eye(3, device=self.d0)
+    x = Tensor.eye(3).clone(self.d0)
     y = Tensor([[2.0,0,-2.0]], device=self.d0)
     z = y.matmul(x).to(self.d1).sum()
     z.backward()

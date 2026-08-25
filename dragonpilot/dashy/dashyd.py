@@ -33,7 +33,7 @@ can be a pure display layer with no conversion logic.
 Publishes: dashyState (pre-serialized JSON at 15Hz)
 """
 import json
-import cereal.messaging as messaging
+import openpilot.cereal.messaging as messaging
 from openpilot.common.params import Params
 from openpilot.common.realtime import Ratekeeper
 from openpilot.common.swaglog import cloudlog
@@ -77,7 +77,7 @@ def get_car_params_from_params():
     if _car_params_cache is not None:
         return _car_params_cache
     try:
-        from cereal import car
+        from opendbc.car.structs import car
         cp_bytes = _ensure_params().get("CarParams")
         if cp_bytes:
             with car.CarParams.from_bytes(cp_bytes) as cp:
@@ -218,7 +218,7 @@ def extract_lead(lead, sm):
     d_rel = float(lead.dRel)
     v_rel = float(lead.vRel)
     y_rel = float(lead.yRel)
-    has_lead = bool(lead.status)
+    has_lead = bool(lead.present)
 
     # Pre-format lead display values. Each metric ships as a
     # (value, unit) pair so the HUD can tabular-align numbers without
@@ -270,14 +270,14 @@ def extract_radar_state(sm):
 
 
 def extract_live_tracks(sm):
-    """Extract liveTracks radar points for bird's eye view.
+    """Extract radarTracks radar points for bird's eye view.
 
     Filters out tracks that are already shown as leadOne or leadTwo.
     Uses radarTrackId matching: when radarState matches a liveTrack to a lead,
     radarTrackId changes from -1 (vision-only) to the track's ID.
     """
     try:
-        lt = sm['liveTracks']
+        lt = sm['radarTracks']
         points = []
 
         # Get lead vehicle radar track IDs to filter them out
@@ -286,9 +286,9 @@ def extract_live_tracks(sm):
         lead_track_ids = set()
         if sm.valid.get('radarState', False):
             rs = sm['radarState']
-            if rs.leadOne.status and rs.leadOne.radarTrackId >= 0:
+            if rs.leadOne.present and rs.leadOne.radarTrackId >= 0:
                 lead_track_ids.add(rs.leadOne.radarTrackId)
-            if rs.leadTwo.status and rs.leadTwo.radarTrackId >= 0:
+            if rs.leadTwo.present and rs.leadTwo.radarTrackId >= 0:
                 lead_track_ids.add(rs.leadTwo.radarTrackId)
 
         if hasattr(lt, 'points'):
@@ -357,8 +357,8 @@ def extract_model_v2(sm):
 
 
 def extract_live_calibration(sm):
-    """Extract liveCalibration fields used by dashy."""
-    cal = sm['liveCalibration']
+    """Extract extrinsicsCalibration fields used by dashy."""
+    cal = sm['extrinsicsCalibration']
     return {
         'rpyCalib': list(cal.rpyCalib) if hasattr(cal, 'rpyCalib') and cal.rpyCalib else [],
         'calStatus': str(cal.calStatus) if hasattr(cal, 'calStatus') else 'uncalibrated',
@@ -409,17 +409,17 @@ TOPICS = {
     'carState':         {'extractor': extract_car_state,         'rate': 'fast'},
     'selfdriveState':   {'extractor': extract_selfdrive_state,   'rate': 'fast'},
     'radarState':       {'extractor': extract_radar_state,       'rate': 'fast'},
-    'liveTracks':       {'extractor': extract_live_tracks,       'rate': 'fast'},
+    'radarTracks':      {'extractor': extract_live_tracks,       'rate': 'fast', 'cache_key': 'liveTracks'},
     'modelV2':          {'extractor': extract_model_v2,          'rate': 'fast'},
     'longitudinalPlan': {'extractor': extract_longitudinal_plan, 'rate': 'fast'},
 
     # Slow topics - poll at fixed intervals
     'deviceState':      {'extractor': extract_device_state,      'rate': LOOP_RATE // 2},
-    'liveCalibration':  {'extractor': extract_live_calibration,  'rate': LOOP_RATE},
+    'extrinsicsCalibration': {'extractor': extract_live_calibration, 'rate': LOOP_RATE, 'cache_key': 'liveCalibration'},
     'carParams':        {'extractor': extract_car_params,        'rate': LOOP_RATE * 2},
 
     # Valid-only topics - just track valid state
-    'roadCameraState':  {'rate': 'valid', 'default': False},
+    'narrowRoadCameraState': {'rate': 'valid', 'default': False, 'cache_key': 'roadCameraState'},
 
     # Subscribe-only topics - subscribed but extracted within other extractors
     'controlsState':    {'rate': 'subscribe'},
@@ -438,10 +438,10 @@ def _available_topics(topics_cfg):
     in the TOPICS entry), which the frontend already null-checks.
     """
     try:
-        from cereal.services import SERVICE_LIST as _services
+        from openpilot.cereal.services import SERVICE_LIST as _services
     except ImportError:
         try:
-            from cereal.services import services as _services
+            from openpilot.cereal.services import services as _services
         except ImportError:
             return topics_cfg
 
@@ -470,14 +470,14 @@ def main():
 
     # Initialize cache from TOPICS defaults (always include all topics so
     # the frontend gets default values for dropped optional ones too).
-    cache = {t: cfg.get('default') for t, cfg in TOPICS.items() if cfg.get('rate') != 'subscribe'}
+    cache = {cfg.get('cache_key', t): cfg.get('default') for t, cfg in TOPICS.items() if cfg.get('rate') != 'subscribe'}
     cache['carParams'] = get_car_params_from_params()  # special: init from Params
 
     # Build topic lists from the filtered topics (only subscribed ones run their extractors)
-    fast_topics = {t: cfg['extractor'] for t, cfg in topics.items() if cfg.get('rate') == 'fast'}
-    slow_topics = {t: (cfg['extractor'], cfg['rate']) for t, cfg in topics.items()
+    fast_topics = {t: (cfg['extractor'], cfg.get('cache_key', t)) for t, cfg in topics.items() if cfg.get('rate') == 'fast'}
+    slow_topics = {t: (cfg['extractor'], cfg['rate'], cfg.get('cache_key', t)) for t, cfg in topics.items()
                    if isinstance(cfg.get('rate'), int)}
-    valid_topics = [t for t, cfg in topics.items() if cfg.get('rate') == 'valid']
+    valid_topics = [(t, cfg.get('cache_key', t)) for t, cfg in topics.items() if cfg.get('rate') == 'valid']
 
     cache_dirty = True
     frame_count = 0
@@ -492,23 +492,23 @@ def main():
             cache_dirty = True  # Force re-format with new units
 
         # Fast topics - extract when updated
-        for topic, extractor in fast_topics.items():
+        for topic, (extractor, cache_key) in fast_topics.items():
             if sm.updated[topic]:
-                cache[topic] = extractor(sm)
+                cache[cache_key] = extractor(sm)
                 cache_dirty = True
 
         # Slow topics - extract at fixed intervals (ignore sm.updated)
-        for topic, (extractor, divider) in slow_topics.items():
+        for topic, (extractor, divider, cache_key) in slow_topics.items():
             if frame_count % divider == 0:
-                cache[topic] = extractor(sm)
+                cache[cache_key] = extractor(sm)
                 cache_dirty = True
 
         # Valid-only topics - just track valid state
-        for topic in valid_topics:
+        for topic, cache_key in valid_topics:
             if sm.updated[topic]:
                 new_val = sm.valid[topic]
-                if cache[topic] != new_val:
-                    cache[topic] = new_val
+                if cache[cache_key] != new_val:
+                    cache[cache_key] = new_val
                     cache_dirty = True
 
         # Only serialize and publish if something changed

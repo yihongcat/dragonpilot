@@ -1,16 +1,18 @@
-# FW query is disabled for MG for now (see values.py): the MG ZS has no captured
-# FW versions yet and no CAN fingerprint, so it is identified by forced car
-# selection only. Leaving FW_VERSIONS undefined keeps MG out of the FW-query path
-# (get_interface_attr uses ignore_none). Restore once we can query FW on the MG ZS:
-#
-# from opendbc.car.structs import CarParams
-# from opendbc.car.mg.values import CAR
-#
-# Ecu = CarParams.Ecu
-#
-# FW_VERSIONS = {
-#   CAR.MG_ZS: {
-#     # populate via tools/car_porting/auto_fingerprint.py once a route with FW
-#     # query enabled is captured on the 2025 MG ZS
-#   },
-# }
+from opendbc.car.structs import CarParams
+from opendbc.car.mg.values import CAR
+
+Ecu = CarParams.Ecu
+
+FW_VERSIONS = {
+  CAR.MG_5_EV: {
+    (Ecu.eps, 0x721, None): [
+      b'\x10gs\x16\x01',
+    ],
+    (Ecu.fwdCamera, 0x733, None): [
+      b'\x10y\x00 \x01',
+    ],
+    (Ecu.fwdRadar, 0x734, None): [
+      b'\x10y\x000\x01',
+    ],
+  },
+}

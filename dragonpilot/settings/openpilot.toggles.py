@@ -10,7 +10,7 @@ dashy's settings-context dict sets DASHY=True; the device dp panel leaves it uns
 (falsy), hiding these to avoid duplicating the existing Toggles tab.
 
 No flags/param_type/default on items: the params are owned by upstream openpilot
-and already declared in common/params_keys.h. generate_settings.py won't emit
+and already declared in openpilot/common/params_keys.h. generate_settings.py won't emit
 duplicates because these have no flags+param_type pair.
 
 Drift detection: see system/tests/test_openpilot_mirror.py.

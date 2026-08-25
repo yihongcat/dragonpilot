@@ -20,7 +20,7 @@ Dragonpilot settings aggregator.
 Each feature branch drops a single `<branch>.py` in this directory. The module
 exposes ITEMS - a list of dicts where each dict carries both UI fields (for the
 dp settings panel) and param-storage fields (consumed at build time by
-generate_settings.py to produce common/params_keys.h).
+generate_settings.py to produce openpilot/common/params_keys.h).
 
 Param-only entries (no UI) just omit the UI fields - they still get picked up
 by the C++ generator but the aggregator skips them.
