@@ -40,7 +40,7 @@ class TestALKALatActive(unittest.TestCase):
   This mirrors the logic in controlsd.py:
     alka_enabled = (self.CP.alternativeExperience & ALTERNATIVE_EXPERIENCE.ALKA) != 0
     lkas_on = self.sm['carStateExt'].lkasOn
-    calibrated = self.sm['liveCalibration'].calStatus == log.LiveCalibrationData.Status.calibrated
+    calibrated = self.sm['extrinsicsCalibration'].calStatus == log.ExtrinsicsCalibration.Status.calibrated
     gear_ok = CS.gearShifter not in (park, neutral, reverse)
     alka_active = lkas_on and gear_ok and calibrated and not CS.seatbeltUnlatched and not CS.doorOpen
     CC.latActive = (self.sm['selfdriveState'].active or alka_active) and not CS.steerFaultTemporary and not CS.steerFaultPermanent and \
