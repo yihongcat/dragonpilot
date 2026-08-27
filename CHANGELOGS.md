@@ -8,7 +8,7 @@ dragonpilot 0.11.2 r3 (2026-08-25)
 * 🛠️ 同步硬件目录由 TICI 向 comma 的重命名、摄像头流类型迁移及 road/wide/cabin 摄像头命名调整，并完成 DP 设备端接口适配
 * 🛠️ 修复新版 manager/UI 启动接口兼容，包含启动时误报“openpilot 无法使用”、更新界面崩溃恢复、按钮文字宽度及部分界面显示问题
 * 🛠️ 修复字体回退接口更名导致设备卡在逗号画面，并改为从 OpFont OTF 动态加载简繁中文等亚洲语言字形，增加 UI 字体资源与启动回归测试
-* 🛠️ 在 AGNOS 启动时补齐 Dashy 的 `aiohttp` 运行依赖；网络安装失败时安全禁用 Dashy server，避免反复触发 `process not running`
+* 🛠️ AGNOS 固定环境缺少可选的 Dashy `aiohttp` 依赖时自动禁用 Dashy server，避免联网安装阻塞启动或反复触发 `process not running`；驾驶与主界面进程不受影响
 * 🛠️ 适配新版车型平台 flags 与 CarInterface 参数签名，恢复 ALKA、扩展收发安全钩子及 DP 自定义 Panda/TICI 进程构建
 * 🛠️ 同步 loggerd 启动延迟与日志轮转修复、GPS/AGPS 重试、摄像头时钟稳定性、参数退出清理及原子写入清理改进
 * 🛠️ 同步 WebRTC 消息竞争修复、本机绑定、无 CarParams 容错、云端日志及更明确的错误提示
