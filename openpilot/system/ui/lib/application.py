@@ -1,5 +1,6 @@
 import atexit
 import cffi
+import gettext
 import math
 import os
 import queue
@@ -19,7 +20,7 @@ from typing import NamedTuple
 from importlib.resources import as_file, files
 from openpilot.common.swaglog import cloudlog
 from openpilot.common.hardware import HARDWARE, PC
-from openpilot.system.ui.lib.multilang import FONT_FALLBACK_LANGUAGES, TRANSLATIONS_DIR, multilang
+from openpilot.system.ui.lib.multilang import TRANSLATIONS_DIR, multilang
 from openpilot.common.realtime import Ratekeeper
 
 _DEFAULT_FPS = int(os.getenv("FPS", {'tici': 20, 'tizi': 20}.get(HARDWARE.get_device_type(), 60)))
@@ -93,21 +94,12 @@ FONT_SCALE = 1.242 if BIG_UI else 1.16
 ASSETS_DIR = files("openpilot.selfdrive").joinpath("assets")
 FONT_DIR = ASSETS_DIR.joinpath("fonts")
 EXTRA_FONT_CHARS = "–‑✓×°§•X⚙✕◀▶✔⌫⇧␣○●↳çêüñ–‑✓×°§•€£¥"
-NOTO_FONTS = {
-  "ja": "NotoSansCJKjp-Regular.otf",
-  "ko": "NotoSansCJKkr-Regular.otf",
-  "th": "NotoSansThai-Regular.ttf",
-  "zh-CHS": "NotoSansCJKsc-Regular.otf",
-  "zh-CHT": "NotoSansCJKtc-Regular.otf",
-}
-
-
 class FontWeight(StrEnum):
-  NORMAL = "Inter-Regular.fnt" if BIG_UI else "Inter-Medium.fnt"
-  MEDIUM = "Inter-Medium.fnt"
-  BOLD = "Inter-Bold.fnt"
-  SEMI_BOLD = "Inter-SemiBold.fnt"
-  UNIFONT = "OpFont-Regular-Labels.fnt"
+  NORMAL = "Inter-Regular.ttf" if BIG_UI else "Inter-Medium.ttf"
+  MEDIUM = "Inter-Medium.ttf"
+  BOLD = "Inter-Bold.ttf"
+  SEMI_BOLD = "Inter-SemiBold.ttf"
+  UNIFONT = "unifont.otf"
 
   # Small UI fonts
   DISPLAY_REGULAR = "Inter-Regular.ttf"
@@ -115,18 +107,43 @@ class FontWeight(StrEnum):
   DISPLAY = "Inter-Bold.ttf"
 
 _OPFONT_WEIGHT = {
-  "Inter-Light.fnt": "Regular",
-  "Inter-Regular.fnt": "Regular",
-  "Inter-Medium.fnt": "Medium",
-  "Inter-SemiBold.fnt": "SemiBold",
-  "Inter-Bold.fnt": "Bold",
+  "Inter-Light.ttf": "OpFont-Regular.otf",
+  "Inter-Regular.ttf": "OpFont-Regular.otf",
+  "Inter-Medium.ttf": "OpFont-Medium.otf",
+  "Inter-SemiBold.ttf": "OpFont-SemiBold.otf",
+  "Inter-Bold.ttf": "OpFont-Bold.otf",
 }
 
 
-def _opfont_filename(inter_filename: str, lang_code: str) -> str:
-  """Map an Inter font filename to the equivalent OpFont filename for a language."""
-  weight_name = _OPFONT_WEIGHT.get(inter_filename, "Regular")
-  return f"OpFont-{weight_name}-{lang_code}.fnt"
+def _opfont_filename(inter_filename: str) -> str:
+  """Map an Inter font filename to the equivalent source OpFont."""
+  return _OPFONT_WEIGHT.get(inter_filename, "OpFont-Regular.otf")
+
+
+def _translation_chars(lang_code: str) -> set[str]:
+  chars: set[str] = set()
+  po_path = TRANSLATIONS_DIR.joinpath(f"app_{lang_code}.po")
+  if po_path.is_file():
+    chars.update(po_path.read_text(encoding="utf-8"))
+
+  mo_path = TRANSLATIONS_DIR.joinpath(f"dragonpilot_{lang_code}.mo")
+  if mo_path.is_file():
+    with mo_path.open("rb") as fh:
+      catalog = gettext.GNUTranslations(fh)._catalog
+    for value in catalog.values():
+      if isinstance(value, str):
+        chars.update(value)
+  return chars
+
+
+def _font_codepoints(font_weight: FontWeight, lang_code: str) -> list[int]:
+  chars = set(map(chr, range(32, 127))) | set(EXTRA_FONT_CHARS)
+  if font_weight == FontWeight.UNIFONT:
+    for language in multilang.languages:
+      chars.update(language)
+  else:
+    chars.update(_translation_chars(lang_code))
+  return sorted(map(ord, chars))
 
 
 def font_fallback(font: rl.Font) -> rl.Font:
@@ -232,7 +249,6 @@ class GuiApplication:
     self._set_log_callback()
 
     self._fonts: dict[FontWeight, rl.Font] = {}
-    self._fallback_fonts: dict[str, rl.Font] = {}
     self._width = width if width is not None else GuiApplication._default_width()
     self._height = height if height is not None else GuiApplication._default_height()
     self._active_lang_code: str = ""
@@ -590,9 +606,6 @@ class GuiApplication:
     for font in self._fonts.values():
       rl.unload_font(font)
     self._fonts = {}
-    for font in self._fallback_fonts.values():
-      rl.unload_font(font)
-    self._fallback_fonts = {}
     self._active_lang_code = ""
 
     if self._render_texture is not None:
@@ -715,36 +728,23 @@ class GuiApplication:
 
   def font(self, font_weight: FontWeight = FontWeight.NORMAL) -> rl.Font:
     if font_weight not in self._fonts:
-      # For languages needing a fallback font, load OpFont instead of Inter (except labels font)
-      if multilang.requires_font_fallback() and font_weight != FontWeight.UNIFONT:
-        filename = _opfont_filename(font_weight.value, self._active_lang_code)
-      else:
-        filename = font_weight.value
+      use_opfont = multilang.requires_font_fallback() and font_weight != FontWeight.UNIFONT
+      filename = _opfont_filename(font_weight.value) if use_opfont else font_weight.value
+      codepoints = _font_codepoints(font_weight, self._active_lang_code)
+      codepoint_buffer = rl.ffi.new("int[]", codepoints)
       with as_file(FONT_DIR) as fspath:
         fnt_path = fspath / filename
-        # Fall back to Regular weight if requested weight doesn't exist
-        if not fnt_path.exists() and multilang.requires_font_fallback():
-          filename = f"OpFont-Regular-{self._active_lang_code}.fnt"
-          fnt_path = fspath / filename
-        font = rl.load_font(fnt_path.as_posix())
-        rl.set_texture_filter(font.texture, rl.TextureFilter.TEXTURE_FILTER_BILINEAR)
+        font_size = 48 if use_opfont else (16 if font_weight == FontWeight.UNIFONT else 200)
+        font = rl.load_font_ex(fnt_path.as_posix(), font_size,
+                               rl.ffi.cast("int *", codepoint_buffer), len(codepoints))
+        if font_weight != FontWeight.UNIFONT:
+          rl.gen_texture_mipmaps(font.texture)
+          rl.set_texture_filter(font.texture, rl.TextureFilter.TEXTURE_FILTER_TRILINEAR)
         self._fonts[font_weight] = font
     return self._fonts[font_weight]
 
   def fallback_font(self) -> rl.Font:
-    language = multilang.language
-    if language not in self._fallback_fonts:
-      chars = set(map(chr, range(32, 127))) | set(EXTRA_FONT_CHARS)
-      chars.update(TRANSLATIONS_DIR.joinpath(f"app_{language}.po").read_text(encoding="utf-8"))
-      codepoints = sorted(map(ord, chars))
-      codepoint_buffer = rl.ffi.new("int[]", codepoints)
-      with as_file(FONT_DIR) as fspath:
-        font = rl.load_font_ex((fspath / NOTO_FONTS[language]).as_posix(), 48,
-                               rl.ffi.cast("int *", codepoint_buffer), len(codepoints))
-      rl.gen_texture_mipmaps(font.texture)
-      rl.set_texture_filter(font.texture, rl.TextureFilter.TEXTURE_FILTER_TRILINEAR)
-      self._fallback_fonts[language] = font
-    return self._fallback_fonts[language]
+    return self.font(FontWeight.NORMAL)
 
   @property
   def width(self):
@@ -755,24 +755,8 @@ class GuiApplication:
     return self._height
 
   def _load_fonts(self):
-    # for font_weight_file in FontWeight:
-    #   with as_file(FONT_DIR) as fspath:
-    #     fnt_path = fspath / font_weight_file
-    #     font = rl.load_font(fnt_path.as_posix())
-    #     if font_weight_file != FontWeight.UNIFONT:
-    #       rl.set_texture_filter(font.texture, rl.TextureFilter.TEXTURE_FILTER_BILINEAR)
-    #     self._fonts[font_weight_file] = font
-    # rl.gui_set_font(self._fonts[FontWeight.NORMAL])
-
-    # dp - lazy, language-aware font loading. Set the active language then load
-    # the NORMAL weight via font(), which picks OpFont (CJK-capable) over Inter
-    # when the current language requires unifont. Loading all weights eagerly
-    # here (upstream behavior) would bypass the OpFont remapping in font() and
-    # render tofu boxes for non-Latin languages at startup.
-    #
-    # Original upstream implementation (intentionally replaced — do not restore
-    # on rebase; it pre-fills self._fonts with Inter and defeats font()'s OpFont
-    # selection):
+    # Load only the active language. Asian languages use the source OpFont OTF
+    # directly, avoiding the generated .fnt files removed by upstream.
     self._active_lang_code = multilang.language
     rl.gui_set_font(self.font(FontWeight.NORMAL))
 

@@ -18,12 +18,23 @@ def test_font_fallback_api_compatibility(monkeypatch):
 
   fallback = Mock(return_value=True)
   monkeypatch.setattr(multilang, "requires_font_fallback", fallback)
-  monkeypatch.setattr(application, "as_file", Mock(return_value=nullcontext(Path("/missing-fonts"))))
+  monkeypatch.setattr(application, "as_file", Mock(return_value=nullcontext(Path("/fonts"))))
   loaded_font = SimpleNamespace(texture=SimpleNamespace())
   load_font = Mock(return_value=loaded_font)
-  monkeypatch.setattr(application.rl, "load_font", load_font)
+  monkeypatch.setattr(application.rl, "load_font_ex", load_font)
+  monkeypatch.setattr(application.rl, "gen_texture_mipmaps", Mock())
   monkeypatch.setattr(application.rl, "set_texture_filter", Mock())
 
   assert app.font(FontWeight.NORMAL) is loaded_font
-  assert fallback.call_count == 2
-  load_font.assert_called_once_with("/missing-fonts/OpFont-Regular-zh-CHS.fnt")
+  assert fallback.call_count == 1
+  assert load_font.call_args.args[0] == "/fonts/OpFont-Medium.otf"
+  assert load_font.call_args.args[1] == 48
+  assert load_font.call_args.args[3] > 100
+
+
+def test_all_font_sources_exist():
+  with application.as_file(application.FONT_DIR) as font_dir:
+    for font_weight in FontWeight:
+      assert (font_dir / font_weight.value).is_file()
+      if font_weight != FontWeight.UNIFONT:
+        assert (font_dir / application._opfont_filename(font_weight.value)).is_file()
