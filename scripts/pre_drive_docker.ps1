@@ -66,13 +66,20 @@ try {
     throw "Docker tests require a clean local commit. Commit the intended snapshot locally before running this command."
   }
 
+  $commit = (& git rev-parse HEAD).Trim()
+  $gitCommonDir = (& git rev-parse --path-format=absolute --git-common-dir).Trim()
+  if ($LASTEXITCODE -ne 0 -or -not (Test-Path -LiteralPath $gitCommonDir)) {
+    throw "Failed to locate the shared Git directory for this worktree."
+  }
+
   & $docker compose -f $composeFile build pre-drive
   if ($LASTEXITCODE -ne 0) {
     throw "Failed to build the pre-drive test image."
   }
 
-  $syncCommand = "set -euo pipefail; find /workspace -mindepth 1 -maxdepth 1 -exec rm -rf -- {} +; GIT_LFS_SKIP_SMUDGE=1 git clone --depth 1 file:///source /workspace; git -C /workspace lfs ls-files -n | tar -C /source -T - -cf - | tar -C /workspace -xf -; git -C /workspace status --short --branch"
-  & $docker compose -f $composeFile run --rm pre-drive bash -lc $syncCommand
+  $syncCommand = "set -euo pipefail; find /workspace -mindepth 1 -maxdepth 1 -exec rm -rf -- {} +; git -C /workspace init; git -C /workspace remote add origin file:///source-git; GIT_LFS_SKIP_SMUDGE=1 git -C /workspace fetch --depth 1 origin $commit; git -C /workspace checkout --detach FETCH_HEAD; git -C /workspace lfs ls-files -n | tar -C /source -T - -cf - | tar -C /workspace -xf -; git -C /workspace status --short --branch"
+  $gitCommonMount = "${gitCommonDir}:/source-git:ro"
+  & $docker compose -f $composeFile run --rm --volume $gitCommonMount pre-drive bash -lc $syncCommand
   if ($LASTEXITCODE -ne 0) {
     throw "Failed to create the isolated Linux test workspace."
   }

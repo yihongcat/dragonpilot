@@ -715,15 +715,15 @@ class GuiApplication:
 
   def font(self, font_weight: FontWeight = FontWeight.NORMAL) -> rl.Font:
     if font_weight not in self._fonts:
-      # For languages need unifont, load OpFont instead of Inter (except labels font)
-      if multilang.requires_unifont() and font_weight != FontWeight.UNIFONT:
+      # For languages needing a fallback font, load OpFont instead of Inter (except labels font)
+      if multilang.requires_font_fallback() and font_weight != FontWeight.UNIFONT:
         filename = _opfont_filename(font_weight.value, self._active_lang_code)
       else:
         filename = font_weight.value
       with as_file(FONT_DIR) as fspath:
         fnt_path = fspath / filename
         # Fall back to Regular weight if requested weight doesn't exist
-        if not fnt_path.exists() and multilang.requires_unifont():
+        if not fnt_path.exists() and multilang.requires_font_fallback():
           filename = f"OpFont-Regular-{self._active_lang_code}.fnt"
           fnt_path = fspath / filename
         font = rl.load_font(fnt_path.as_posix())
