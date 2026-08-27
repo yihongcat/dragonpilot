@@ -7,10 +7,12 @@ dragonpilot 0.11.2 r3 (2026-08-25)
 * ✨ 同步 AGNOS 18.8 至 19.6 相关更新逻辑，以及安装、更新器崩溃恢复、旧固件升级和系统时间处理改进
 * 🛠️ 同步硬件目录由 TICI 向 comma 的重命名、摄像头流类型迁移及 road/wide/cabin 摄像头命名调整，并完成 DP 设备端接口适配
 * 🛠️ 修复新版 manager/UI 启动接口兼容，包含启动时误报“openpilot 无法使用”、更新界面崩溃恢复、按钮文字宽度及部分界面显示问题
+* 🛠️ 修复字体回退接口更名导致设备卡在逗号画面，并增加 UI 启动回归测试
+* 🛠️ 在 AGNOS 启动时补齐 Dashy 的 `aiohttp` 运行依赖；网络安装失败时安全禁用 Dashy server，避免反复触发 `process not running`
 * 🛠️ 适配新版车型平台 flags 与 CarInterface 参数签名，恢复 ALKA、扩展收发安全钩子及 DP 自定义 Panda/TICI 进程构建
 * 🛠️ 同步 loggerd 启动延迟与日志轮转修复、GPS/AGPS 重试、摄像头时钟稳定性、参数退出清理及原子写入清理改进
 * 🛠️ 同步 WebRTC 消息竞争修复、本机绑定、无 CarParams 容错、云端日志及更明确的错误提示
-* 🧪 Docker 上车前检查通过：Git/LFS 完整性、消息系统启动、54 项摄像头/规划/弯道减速测试、全量 SCons/Panda 构建，以及 Toyota 的 `selfdrived`、`controlsd`、`card`、`plannerd` 路线回放
+* 🧪 Docker 上车前检查通过：Git/LFS 完整性、消息系统启动、56 项摄像头/UI/manager/规划/弯道减速测试、全量 SCons/Panda 构建，以及 Toyota 的 `selfdrived`、`controlsd`、`card`、`plannerd` 路线回放
 * ⚠️ 官方 MetaDrive 用例因当前环境条件自动跳过；台架和实际道路测试尚未完成，因此当前仅发布到 `merge/comma-master` 与安装仓库 `update-test`，未更新正式 `install` / `static`
 * ⚠️ 按无外置 GPU 的使用场景保留标准驾驶模型，不包含也不测试 USB-GPU 大模型
 

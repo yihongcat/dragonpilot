@@ -89,7 +89,8 @@ git log -1 --oneline --decorate
 3. 确认 `driving_supercombo.onnx` 是完整 LFS 文件，而不是指针文本。
 4. 无驾驶员摄像头能力判断测试。
 5. UI 亚洲语言字体回退启动兼容测试。
-6. 弯道距离预判、提前减速和 jerk 限制测试。
+6. manager 的 DP 常驻服务依赖与导入测试。
+7. 弯道距离预判、提前减速和 jerk 限制测试。
 
 通过标准：
 

@@ -58,10 +58,11 @@ run_integrity_checks() {
 }
 
 run_unit_tests() {
-  stage "Gate 1: camera capability, UI startup, planner compatibility, and curve-deceleration tests"
+  stage "Gate 1: camera capability, UI/manager startup, planner compatibility, and curve-deceleration tests"
   uv run --python 3.12 --with pytest pytest -q \
     openpilot/system/hardware/tests/test_capabilities.py \
     openpilot/system/ui/lib/tests/test_application.py \
+    dragonpilot/dashy/tests/test_serverd_startup.py \
     openpilot/selfdrive/controls/tests/test_curve_speed_limiter.py \
     openpilot/selfdrive/controls/tests/test_curve_planner_integration.py \
     dragonpilot/selfdrive/controls/lib/test_acm.py \
@@ -69,12 +70,13 @@ run_unit_tests() {
 }
 
 run_native_bootstrap() {
-  if uv run --python 3.12 python -c "from msgq.visionipc import VisionStreamType" >/dev/null 2>&1; then
+  if uv run --python 3.12 python -c "from msgq.visionipc import VisionStreamType; from openpilot.common.params import Params" >/dev/null 2>&1; then
     return
   fi
 
   stage "Gate 1: native messaging bootstrap"
   uv run --python 3.12 scons -j4 \
+    openpilot/common/libparams_c.so \
     msgq_repo/msgq/ipc_pyx.so \
     msgq_repo/msgq/visionipc/visionipc_pyx.so
 }

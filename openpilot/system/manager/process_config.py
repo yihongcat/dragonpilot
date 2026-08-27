@@ -1,3 +1,4 @@
+import importlib.util
 import os
 import platform
 import time
@@ -12,6 +13,7 @@ from msgq.visionipc import VisionIpcClient
 WEBCAM = os.getenv("USE_WEBCAM") is not None
 LITE = os.getenv("LITE") is not None
 TICI_DOS = "TICI_DOS" in os.environ
+AIOHTTP_AVAILABLE = importlib.util.find_spec("aiohttp") is not None
 
 driver_camera_missing_since: float | None = None
 driver_camera_probe_result: bool | None = None
@@ -175,7 +177,7 @@ procs = [
   PythonProcess("joystick", "openpilot.tools.joystick.joystick_control", and_(joystick, iscar)),
 
   # dashy
-  PythonProcess("serverd", "dragonpilot.dashy.serverd", always_run),
+  PythonProcess("serverd", "dragonpilot.dashy.serverd", always_run, enabled=AIOHTTP_AVAILABLE),
   PythonProcess("dashyd", "dragonpilot.dashy.dashyd", and_(dashy, only_onroad)),
 ]
 

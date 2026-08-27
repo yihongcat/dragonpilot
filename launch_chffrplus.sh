@@ -185,6 +185,26 @@ set_model_fingerprint() {
   fi
 }
 
+# AGNOS ships a fixed Python environment based on upstream openpilot. Install
+# dragonpilot-only runtime dependencies there before manager starts. Keep this
+# non-fatal so a temporary network failure cannot block the driving UI.
+ensure_dp_python_deps() {
+  local venv_python="${VIRTUAL_ENV:-/usr/local/venv}/bin/python3"
+  if [ ! -x "$venv_python" ] || "$venv_python" -c "import aiohttp" >/dev/null 2>&1; then
+    return 0
+  fi
+
+  echo "Installing dragonpilot Python runtime dependencies..."
+  if ! sudo /usr/bin/timeout 120 /usr/bin/uv pip install --python "$venv_python" "aiohttp==3.14.3"; then
+    echo "WARNING: failed to install aiohttp; dashy server will remain disabled"
+    return 0
+  fi
+
+  if ! "$venv_python" -c "import aiohttp" >/dev/null 2>&1; then
+    echo "WARNING: aiohttp is still unavailable; dashy server will remain disabled"
+  fi
+}
+
 function launch {
   # Remove orphaned git lock if it exists on boot
   [ -f "$DIR/.git/index.lock" ] && rm -f $DIR/.git/index.lock
@@ -241,6 +261,7 @@ function launch {
     set_lite_hw
     agnos_init
     set_model_fingerprint
+    ensure_dp_python_deps
   fi
 
   # write tmux scrollback to a file
