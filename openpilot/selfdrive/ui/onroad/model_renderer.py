@@ -110,7 +110,7 @@ class ModelRenderer(Widget):
     sm = ui_state.sm
 
     # Check if data is up-to-date
-    if (sm.recv_frame["liveCalibration"] < ui_state.started_frame or
+    if (sm.recv_frame["extrinsicsCalibration"] < ui_state.started_frame or
         sm.recv_frame["modelV2"] < ui_state.started_frame):
       return
 
@@ -122,8 +122,8 @@ class ModelRenderer(Widget):
     # Update state
     self._experimental_mode = sm['selfdriveState'].experimentalMode
 
-    live_calib = sm['liveCalibration']
-    self._path_offset_z = live_calib.height[0] if live_calib.height else HEIGHT_INIT[0]
+    extrinsics_calibration = sm['extrinsicsCalibration']
+    self._path_offset_z = extrinsics_calibration.height[0] if extrinsics_calibration.height else HEIGHT_INIT[0]
 
     if sm.updated['carParams']:
       self._longitudinal_control = sm['carParams'].openpilotLongitudinalControl
@@ -149,7 +149,7 @@ class ModelRenderer(Widget):
       self._transform_dirty = False
 
     # dp - draw live tracks before everything
-    if ui_state.dp_ui_lead in [DpUiLeadMode.radar, DpUiLeadMode.all] and sm.valid['liveTracks']:
+    if ui_state.dp_ui_lead in [DpUiLeadMode.radar, DpUiLeadMode.all] and sm.valid['radarTracks']:
       self._draw_live_tracks(sm)
 
     # Draw elements
@@ -549,7 +549,7 @@ class ModelRenderer(Widget):
 
   def _draw_live_tracks(self, sm):
     font = gui_app.font(FontWeight.NORMAL)
-    live_tracks = sm['liveTracks']
+    live_tracks = sm['radarTracks']
     font_size = 40
     line_height = 40
 

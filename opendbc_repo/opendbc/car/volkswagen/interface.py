@@ -33,13 +33,7 @@ class CarInterface(CarInterfaceBase):
       else:
         ret.networkLocation = NetworkLocation.fwdCamera
 
-      # The PQ port is in dashcam-only mode due to a fixed six-minute maximum timer on HCA steering. An unsupported
-      # EPS flash update to work around this timer, and enable steering down to zero, is available from:
-      #   https://github.com/pd0wm/pq-flasher
-      # It is documented in a four-part blog series:
-      #   https://blog.willemmelching.nl/carhacking/2022/01/02/vw-part1/
-      # Panda ALLOW_DEBUG firmware required.
-      # ret.dashcamOnly = is_release  # Release support needs HCA timeout fix, safety validation
+      ret.dashcamOnly = is_release  # Release support needs HCA timeout fix, safety validation
 
     elif ret.flags & VolkswagenFlags.MLB:
       # Set global MLB parameters
@@ -79,7 +73,7 @@ class CarInterface(CarInterfaceBase):
         ret.flags |= VolkswagenFlags.ALT_GEAR.value
 
       # only allow gateway harness to escalate Emergency Assist
-      ret.dashcamOnly = ret.networkLocation == NetworkLocation.fwdCamera
+      ret.dashcamOnly = ret.networkLocation == NetworkLocation.fwdCamera and not docs
 
     else:
       # Set global MQB parameters
@@ -122,16 +116,15 @@ class CarInterface(CarInterfaceBase):
     # Global longitudinal tuning defaults, can be overridden per-vehicle
 
     if ret.flags & VolkswagenFlags.MEB:
-      ret.longitudinalActuatorDelay = 0.5
-      ret.longitudinalTuning.kiBP = [0., 30.]
-      ret.longitudinalTuning.kiV = [0.4, 0.]
-
-    ret.alphaLongitudinalAvailable = ret.networkLocation == NetworkLocation.gateway or docs
-    if alpha_long:
       ret.openpilotLongitudinalControl = True
-      safety_configs[0].safetyParam |= VolkswagenSafetyFlags.LONG_CONTROL.value
-      if ret.transmissionType == TransmissionType.manual:
-        ret.minEnableSpeed = 4.5
+      ret.longitudinalActuatorDelay = 0.3
+    else:
+      ret.alphaLongitudinalAvailable = ret.networkLocation == NetworkLocation.gateway or docs
+      if alpha_long:
+        ret.openpilotLongitudinalControl = True
+        safety_configs[0].safetyParam |= VolkswagenSafetyFlags.LONG_CONTROL.value
+        if ret.transmissionType == TransmissionType.manual:
+          ret.minEnableSpeed = 4.5
 
     # Per-vehicle overrides
 
@@ -146,11 +139,5 @@ class CarInterface(CarInterfaceBase):
     if CAN.pt >= 4:
       safety_configs.insert(0, get_safety_config(structs.CarParams.SafetyModel.noOutput))
     ret.safetyConfigs = safety_configs
-
-    if dp_params & structs.DPFlags.VagA0SnG:
-      ret.flags |= VolkswagenFlags.A0SnG.value
-
-    if dp_params & structs.DPFlags.VagAvoidEPSLockout:
-      ret.flags |= VolkswagenFlags.AVOID_EPS_LOCKOUT.value
 
     return ret

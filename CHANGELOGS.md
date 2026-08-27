@@ -1,3 +1,19 @@
+dragonpilot 0.11.2 r3 (2026-08-25)
+=======================
+* ✅ `merge/comma-master` 从 commaai/openpilot `master@02b6cef` 更新至 `master@084747c`，同步 2026-07-28 至 2026-08-21 的 150 个上游提交
+* ✅ 继续采用“先在 openpilot 合并并修复，再转入 DP merge 分支”的流程；本次建立了真正的双父 Git 合并节点，完整保留官方与 DP 两侧历史，后续可继续增量合并
+* ✅ 保留 LITE、无驾驶员摄像头、Dashy、自定义纵向控制、ALKA、安全扩展、车型扩展及现有 dragonpilot 设置
+* ✨ 同步官方巡航规划器减速 jerk 修复，减少巡航减速指令突变；原有 DP 弯道提前减速与平顺释放逻辑继续保留
+* ✨ 同步 AGNOS 18.8 至 19.6 相关更新逻辑，以及安装、更新器崩溃恢复、旧固件升级和系统时间处理改进
+* 🛠️ 同步硬件目录由 TICI 向 comma 的重命名、摄像头流类型迁移及 road/wide/cabin 摄像头命名调整，并完成 DP 设备端接口适配
+* 🛠️ 修复新版 manager/UI 启动接口兼容，包含启动时误报“openpilot 无法使用”、更新界面崩溃恢复、按钮文字宽度及部分界面显示问题
+* 🛠️ 适配新版车型平台 flags 与 CarInterface 参数签名，恢复 ALKA、扩展收发安全钩子及 DP 自定义 Panda/TICI 进程构建
+* 🛠️ 同步 loggerd 启动延迟与日志轮转修复、GPS/AGPS 重试、摄像头时钟稳定性、参数退出清理及原子写入清理改进
+* 🛠️ 同步 WebRTC 消息竞争修复、本机绑定、无 CarParams 容错、云端日志及更明确的错误提示
+* 🧪 Docker 上车前检查通过：Git/LFS 完整性、消息系统启动、54 项摄像头/规划/弯道减速测试、全量 SCons/Panda 构建，以及 Toyota 的 `selfdrived`、`controlsd`、`card`、`plannerd` 路线回放
+* ⚠️ 官方 MetaDrive 用例因当前环境条件自动跳过；台架和实际道路测试尚未完成，因此当前仅发布到 `merge/comma-master` 与安装仓库 `update-test`，未更新正式 `install` / `static`
+* ⚠️ 按无外置 GPU 的使用场景保留标准驾驶模型，不包含也不测试 USB-GPU 大模型
+
 dragonpilot 0.11.2 r2 (2026-07-28)
 =======================
 * ✅ 从远端 `install` 旧版（来源 `test/no-driver-cam-fix@88d1b27`）整合至 `merge/comma-master`

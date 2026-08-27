@@ -16,7 +16,6 @@ import warnings
 ROOT = Path(__file__).resolve().parents[1]
 IGNORED = (
   ROOT / "openpilot/selfdrive/test/process_replay/test_processes.py",
-  ROOT / "openpilot/selfdrive/test/process_replay/test_regen.py",
   ROOT / "openpilot/tools/sim",
 )
 FAILURES = {"failed", "error", "xpassed"}
@@ -172,8 +171,6 @@ def collect(targets, keyword):
       if cls.__name__ == "_FailedTest":
         continue
       if getattr(cls, "__unittest_skip_why__", "") == "parameterized base class":
-        continue
-      if os.environ.get("SKIP_SLOW") and getattr(cls, "SLOW_TEST", False):
         continue
       if not keyword or keyword.lower() in test.id().lower():
         tests.append(test)

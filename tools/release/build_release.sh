@@ -2,14 +2,13 @@
 set -e
 set -x
 
-# git diff --name-status origin/release3-staging | grep "^A" | less
-
 DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" >/dev/null && pwd)"
-
 cd $DIR
 
 BUILD_DIR=/data/openpilot
 SOURCE_DIR="$(git rev-parse --show-toplevel)"
+
+export PYTHONPATH="$BUILD_DIR:$BUILD_DIR/msgq_repo:$BUILD_DIR/opendbc_repo:$BUILD_DIR/rednose_repo:$BUILD_DIR/teleoprtc_repo:$BUILD_DIR/tinygrad_repo"
 
 if [ -z "$RELEASE_BRANCH" ]; then
   echo "RELEASE_BRANCH is not set"
@@ -18,42 +17,40 @@ fi
 
 BUILD_BRANCH=release-mici-staging
 
-if [ -z "$SOURCE_BRANCH" ]; then
-  echo "SOURCE_BRANCH is not set"
-  exit 1
-fi
-
 # set git identity
-source /data/identity.sh
+source "$DIR/identity.sh"
 
 echo "[-] Setting up repo T=$SECONDS"
-rm -rf $BUILD_DIR
-mkdir -p $BUILD_DIR
+if ! git -C "$SOURCE_DIR" worktree remove --force "$BUILD_DIR" 2>/dev/null; then
+  rm -rf $BUILD_DIR
+fi
+git -C "$SOURCE_DIR" worktree prune
+git -C "$SOURCE_DIR" worktree add --detach --no-checkout "$BUILD_DIR"
 cd $BUILD_DIR
-git init
-git remote add origin https://github.com/dragonpilot/dev.git
-git checkout --orphan $SOURCE_BRANCH
+git update-ref -d "refs/heads/$BUILD_BRANCH"
+git symbolic-ref HEAD "refs/heads/$BUILD_BRANCH"
+git read-tree --empty
 
 # do the files copy
 echo "[-] copying files T=$SECONDS"
 cd $SOURCE_DIR
-cp -pR --parents $(./tools/release/release_files.py) $BUILD_DIR/
+./tools/release/release_files.py | xargs -0 cp -pR --parents -t "$BUILD_DIR" --
 
 # in the directory
 cd $BUILD_DIR
 
-rm -f panda/board/obj/panda.bin.signed
-rm -f panda/board/obj/panda_h7.bin.signed
+# use the full CPU available for speeding up the build.
+# openpilot resets the CPU frequencies when test_onroad.py runs below.
+for policy in /sys/devices/system/cpu/cpufreq/policy*; do
+  [ -d "$policy" ] || continue
+  hardware_max="$(cat "$policy/cpuinfo_max_freq")"
+  echo "$hardware_max" | sudo tee "$policy/scaling_max_freq" >/dev/null
+done
 
-VERSION=$(cat openpilot/common/version.h | awk -F[\"-]  '{print $2}')
-echo "[-] committing version $VERSION T=$SECONDS"
-git add -f .
-git commit -a -m "dragonpilot v$VERSION release"
-
-# Build and test before launch_chffrplus.sh creates the on-device package
-# symlinks. SConstruct uses the same package roots for build subprocesses.
-export PYTHONPATH="$BUILD_DIR:$BUILD_DIR/msgq_repo:$BUILD_DIR/opendbc_repo:$BUILD_DIR/rednose_repo:$BUILD_DIR/teleoprtc_repo:$BUILD_DIR/tinygrad_repo"
 scons
+if [ -n "$INCLUDE_BIG_MODEL" ]; then
+  test -f openpilot/selfdrive/modeld/models/big_driving_tinygrad.pkl.chunkmanifest
+fi
 
 scons -j$(nproc) panda/
 
@@ -83,6 +80,7 @@ rm -f openpilot/selfdrive/modeld/models/*.onnx*
 # Mark as prebuilt release
 touch prebuilt
 
+VERSION=$(cat openpilot/common/version.h | awk -F[\"-]  '{print $2}')
 # dragonpilot customized
 find . -name '*.cc' -delete
 find openpilot/selfdrive/ui/ -name '*.h' -delete
@@ -95,10 +93,8 @@ rm -fr tinygrad_repo/extra/hip_gpu_driver/gc_10_3_0_offset.h
 rm -fr tinygrad_repo/extra/accel/tpu/logs/tpu_driver.t1v-n-852cd0d5-w-0.taylor.log.INFO.20210619-062914.26926.gz
 
 # Add built files to git
-git add -f .
-git commit --amend -m "dragonpilot v$VERSION"
-
-git branch -m $RELEASE_BRANCH
+git -c core.compression=0 add -f .
+git -c core.compression=0 -c gc.auto=0 commit -m "dragonpilot v$VERSION"
 
 # Run tests
 # cd $BUILD_DIR

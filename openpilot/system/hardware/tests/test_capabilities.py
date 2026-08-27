@@ -1,11 +1,11 @@
-from msgq.visionipc import VisionStreamType
+from openpilot.cereal.visionipc import VisionStreamType
 
 from openpilot.common.hardware.capabilities import driver_camera_present
 
 
-ROAD = VisionStreamType.VISION_STREAM_ROAD
+ROAD = VisionStreamType.VISION_STREAM_NARROW_ROAD
 WIDE_ROAD = VisionStreamType.VISION_STREAM_WIDE_ROAD
-DRIVER = VisionStreamType.VISION_STREAM_DRIVER
+DRIVER = VisionStreamType.VISION_STREAM_CABIN
 
 
 def test_driver_camera_requires_both_road_streams():

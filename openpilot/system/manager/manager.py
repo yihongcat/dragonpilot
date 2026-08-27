@@ -12,7 +12,7 @@ import openpilot.system.sentry as sentry
 from openpilot.common.utils import atomic_write
 from openpilot.common.params import Params, ParamKeyFlag
 from openpilot.common.text_window import TextWindow
-from openpilot.common.hardware import HARDWARE, TICI
+from openpilot.common.hardware import COMMA_HARDWARE, HARDWARE
 from openpilot.system.manager.helpers import unblock_stdout, save_bootlog
 from openpilot.system.manager.process import ensure_running
 from openpilot.system.manager.process_config import managed_processes
@@ -207,7 +207,7 @@ def manager_thread() -> None:
     shutdown = False
     for param in ("DoUninstall", "DoShutdown", "DoReboot", "dp_dev_reset_conf"):
       if params.get_bool(param):
-        if TICI and param == "dp_dev_reset_conf":
+        if COMMA_HARDWARE and param == "dp_dev_reset_conf":
           os.system("rm -fr /data/params/d/dp_*")
         shutdown = True
         params.put("LastManagerExitReason", f"{param} {datetime.datetime.now()}", block=True)
