@@ -26,17 +26,21 @@ EVENT_CURVATURE_PERCENTILE = 85.0
 EVENT_ENTRY_CURVATURE_FRACTION = 0.35
 CURVE_CONFIRMATION_FRAMES = 3
 CURVE_CONFIRMATION_MIN_TRAVEL = 3.0  # m, rejects features fixed in prediction space
-TRACK_WORLD_TOLERANCE = 6.0  # m
+LANE_CHANGE_ROAD_TURN_MIN_HEADING = math.radians(15.0)
+LANE_CHANGE_ROAD_TURN_MIN_COHERENCE = 0.8
+LANE_CHANGE_ROAD_TURN_CONFIRMATION_FRAMES = 4
+LANE_CHANGE_ROAD_TURN_MAX_DISTANCE = 100.0  # m, matches the useful visible model horizon
+TRACK_WORLD_TOLERANCE = 10.0  # m, allows normal model entry-point jitter without merging separate curves
 TRACK_DISTANCE_TOLERANCE_FACTOR = 0.05
 TRACK_MISS_FRAMES = 2
 TRACK_PROGRESS_MISS_FRAMES = 2
 MIN_APPROACH_RATIO = 0.7
-APPROACH_ERROR_TOLERANCE = 5.0  # m, allows for sparse far-horizon model points
+APPROACH_ERROR_TOLERANCE = 10.0  # m, allows sparse far-horizon points and observed entry-distance jitter
 APPROACH_ERROR_TOLERANCE_FACTOR = 0.35
 PLANNER_RESPONSE_MARGIN = 0.2  # s
 POSITIVE_ACCEL_RESPONSE_MARGIN = 0.75  # s, curve cap can start while accelerating
 CURVE_ENTRY_MARGIN = 3.0  # m
-CURVE_COAST_ACCEL = 0.25  # m/s^2, preview/at-target cap prevents hard re-acceleration
+CURVE_COAST_ACCEL = 0.0  # m/s^2, an unconfirmed preview may lift throttle but never request braking
 TARGET_SPEED_RELEASE_BUFFER = 0.3  # m/s, stop curve braking before crossing the target speed
 RELEASE_HOLD_FRAMES = round(0.5 / DT_MDL)
 RELEASE_ACCEL = 0.5  # m/s^2, limits how quickly the speed boundary rises after a turn
@@ -221,6 +225,13 @@ class CurveSpeedLimiter:
     self.ego_distance = 0.0
     self.tracks: list[_CurveTrack] = []
     self.confirmation_frames = 0
+    self.target_confirmed = False
+    self.lane_change_holding = False
+    self.lane_change_road_turn = False
+    self.lane_change_road_turn_frames = 0
+    self.lane_change_turn_angle = 0.0
+    self.candidate_count = 0
+    self.limiting_candidate_count = 0
 
   def _allowed_lateral_accel(self, strength: int) -> float:
     factor = float(np.interp(strength, [1, 100], [1.0, MAX_STRENGTH_LAT_ACCEL_FACTOR]))
@@ -256,6 +267,39 @@ class CurveSpeedLimiter:
     if sample_distances[-1] < distances[-1] - 0.1:
       sample_distances = np.append(sample_distances, distances[-1])
     return sample_distances, np.interp(sample_distances, distances, curvatures)
+
+  @classmethod
+  def _lane_change_is_road_turn(cls, rate_plan: np.ndarray, velocity_plan: np.ndarray,
+                                position_x: np.ndarray, position_y: np.ndarray) -> tuple[bool, float]:
+    """Separate a sustained road turn from the opposing curvatures of an S-shaped lane change."""
+    distances = cls._distances(position_x, position_y)
+    signed_curvatures = np.zeros_like(rate_plan)
+    valid_speed = velocity_plan >= MIN_MODEL_SPEED
+    signed_curvatures[valid_speed] = rate_plan[valid_speed] / velocity_plan[valid_speed]
+
+    unique = np.concatenate(([True], np.diff(distances) > 0.1))
+    distances = distances[unique]
+    signed_curvatures = signed_curvatures[unique]
+    if len(distances) < 2 or distances[-1] < 0.1:
+      return False, 0.0
+
+    end = int(np.searchsorted(distances, min(LANE_CHANGE_ROAD_TURN_MAX_DISTANCE, distances[-1]), side="right"))
+    distances = distances[:end]
+    signed_curvatures = signed_curvatures[:end]
+    distance_steps = np.diff(distances)
+    signed_heading = float(np.sum(
+      0.5 * (signed_curvatures[:-1] + signed_curvatures[1:]) * distance_steps,
+    ))
+    absolute_heading = float(np.sum(
+      0.5 * (np.abs(signed_curvatures[:-1]) + np.abs(signed_curvatures[1:])) * distance_steps,
+    ))
+    turn_angle = abs(signed_heading)
+    coherence = turn_angle / max(absolute_heading, 1e-6)
+    is_road_turn = (
+      turn_angle >= LANE_CHANGE_ROAD_TURN_MIN_HEADING and
+      coherence >= LANE_CHANGE_ROAD_TURN_MIN_COHERENCE
+    )
+    return is_road_turn, turn_angle
 
   def _distance_compensation(self, v_ego: float, previous_accel: float) -> float:
     # The constant-deceleration equation assumes the requested acceleration is
@@ -372,6 +416,54 @@ class CurveSpeedLimiter:
     self.tracks = []
     self.confirmation_frames = 0
 
+  def _hold_lane_change_curve(self, v_ego: float, v_cruise: float,
+                              advance_ego_distance: bool = True,
+                              preserve_road_turn_state: bool = False) -> CurveSpeedLimit:
+    """Carry a pre-lane-change road-curve cap without reading the lane-change trajectory."""
+    has_existing_curve = (
+      math.isfinite(self.output_speed) and
+      math.isfinite(self.target_curve_speed) and
+      math.isfinite(self.target_distance)
+    )
+    if not has_existing_curve:
+      if preserve_road_turn_state:
+        self.lane_change_holding = True
+        self.candidate_count = 0
+        self.limiting_candidate_count = 0
+        return CurveSpeedLimit()
+      return self._reset()
+
+    self.lane_change_holding = True
+    self.candidate_count = 0
+    self.limiting_candidate_count = 0
+    if advance_ego_distance:
+      self.ego_distance += v_ego * DT_MDL
+    self.target_distance = max(0.0, self.target_distance - v_ego * DT_MDL)
+
+    raw_target = math.sqrt(
+      self.target_curve_speed ** 2 + 2.0 * NORMAL_CURVE_DECEL * self.target_distance,
+    )
+    self.output_speed = min(self.output_speed, v_cruise, raw_target)
+
+    raw_required_decel = 0.0
+    if v_ego > self.target_curve_speed:
+      distance_for_decel = max(self.target_distance, 0.1)
+      raw_required_decel = (v_ego ** 2 - self.target_curve_speed ** 2) / (2.0 * distance_for_decel)
+
+    unreachable = raw_required_decel > MAX_CURVE_DECEL
+    self.required_decel = (
+      float(np.clip(raw_required_decel, 0.0, MAX_CURVE_DECEL))
+      if self.target_confirmed else 0.0
+    )
+    return CurveSpeedLimit(
+      self.output_speed,
+      self.required_decel,
+      active=True,
+      confirmed=self.target_confirmed,
+      unreachable=unreachable,
+      target_speed=self.target_curve_speed,
+    )
+
   def _reset(self) -> CurveSpeedLimit:
     self.allowed_lateral_accel = self.max_lateral_accel
     self.target_curve_speed = math.inf
@@ -379,6 +471,13 @@ class CurveSpeedLimiter:
     self.output_speed = math.inf
     self.required_decel = 0.0
     self.release_frames = 0
+    self.target_confirmed = False
+    self.lane_change_holding = False
+    self.lane_change_road_turn = False
+    self.lane_change_road_turn_frames = 0
+    self.lane_change_turn_angle = 0.0
+    self.candidate_count = 0
+    self.limiting_candidate_count = 0
     self._clear_tracks()
     return CurveSpeedLimit()
 
@@ -386,6 +485,11 @@ class CurveSpeedLimiter:
     self.target_curve_speed = math.inf
     self.target_distance = math.inf
     self.required_decel = 0.0
+    self.target_confirmed = False
+    self.lane_change_holding = False
+    self.lane_change_road_turn = False
+    self.lane_change_road_turn_frames = 0
+    self.lane_change_turn_angle = 0.0
     if not math.isfinite(self.output_speed):
       return CurveSpeedLimit()
 
@@ -408,7 +512,7 @@ class CurveSpeedLimiter:
     lane_changing = lane_change_state in (log.LaneChangeState.laneChangeStarting,
                                           log.LaneChangeState.laneChangeFinishing)
 
-    if not enabled or strength == 0 or overriding or lane_changing:
+    if not enabled or strength == 0 or overriding:
       return self._reset()
 
     rate_plan = np.asarray(model.orientationRate.z, dtype=float)
@@ -428,6 +532,23 @@ class CurveSpeedLimiter:
     if not valid_plan or not valid_speeds or v_ego <= MIN_CURVE_SPEED or v_cruise <= MIN_CURVE_SPEED:
       return self._reset()
 
+    road_turn = False
+    turn_angle = 0.0
+    if lane_changing:
+      road_turn, turn_angle = self._lane_change_is_road_turn(
+        rate_plan, velocity_plan, position_x, position_y,
+      )
+    self.lane_change_road_turn = road_turn
+    self.lane_change_turn_angle = turn_angle
+    if road_turn:
+      self.lane_change_road_turn_frames += 1
+    elif lane_changing:
+      self.lane_change_road_turn_frames = 0
+      return self._hold_lane_change_curve(v_ego, v_cruise)
+    else:
+      self.lane_change_road_turn_frames = 0
+
+    self.lane_change_holding = False
     self.ego_distance += v_ego * DT_MDL
     self.allowed_lateral_accel = self._allowed_lateral_accel(strength)
     distances, curvatures = self._spatial_curvatures(
@@ -438,15 +559,36 @@ class CurveSpeedLimiter:
       candidate for candidate in candidates
       if math.isfinite(candidate.speed_boundary) and candidate.speed_boundary < v_cruise
     ]
+    self.candidate_count = len(candidates)
+    self.limiting_candidate_count = len(limiting_candidates)
     candidate, track = self._update_tracks(limiting_candidates)
     if candidate is None or track is None:
+      if lane_changing and road_turn:
+        return self._hold_lane_change_curve(
+          v_ego, v_cruise,
+          advance_ego_distance=False,
+          preserve_road_turn_state=True,
+        )
       return self._release(v_ego, v_cruise)
 
     raw_target = candidate.speed_boundary
+    road_turn_confirmed = (
+      lane_changing and road_turn and
+      self.lane_change_road_turn_frames >= LANE_CHANGE_ROAD_TURN_CONFIRMATION_FRAMES and
+      track.frames >= CURVE_CONFIRMATION_FRAMES
+    )
+    if lane_changing and self.target_confirmed and not track.confirmed and not road_turn_confirmed:
+      # A newly jittered candidate must earn confirmation before it can replace
+      # an already-confirmed road curve. Continue the prior cap in the meantime.
+      return self._hold_lane_change_curve(v_ego, v_cruise, advance_ego_distance=False)
+
     self.release_frames = 0
     self.target_curve_speed = candidate.curve_speed
     self.target_distance = candidate.effective_distance
+    if road_turn_confirmed:
+      track.confirmed = True
     confirmed = track.confirmed
+    self.target_confirmed = confirmed
 
     raw_required_decel = 0.0
     if v_ego > self.target_curve_speed:

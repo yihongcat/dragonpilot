@@ -50,6 +50,28 @@ def model_with_curve(curvature: float = 0.0, speed: float = 25.0,
   )
 
 
+def model_with_s_lane_change(curvature: float = 0.02, speed: float = 25.0):
+  model = model_with_curve(0.0, speed=speed)
+  rates = np.zeros(MODEL_SIZE)
+  midpoint = MODEL_SIZE // 2
+  rates[4:midpoint] = curvature * speed
+  rates[midpoint:MODEL_SIZE - 4] = -curvature * speed
+  model.orientationRate.z = rates.tolist()
+  model.meta = SimpleNamespace(laneChangeState=log.LaneChangeState.laneChangeStarting)
+  return model
+
+
+def model_with_s_lane_change(curvature: float = 0.02, speed: float = 25.0):
+  model = model_with_curve(0.0, speed=speed)
+  rates = np.zeros(MODEL_SIZE)
+  midpoint = MODEL_SIZE // 2
+  rates[4:midpoint] = curvature * speed
+  rates[midpoint:MODEL_SIZE - 4] = -curvature * speed
+  model.orientationRate.z = rates.tolist()
+  model.meta = SimpleNamespace(laneChangeState=log.LaneChangeState.laneChangeStarting)
+  return model
+
+
 def update(limiter, model, strength=100, speed=25.0, cruise=35.0,
            enabled=True, overriding=False, previous_accel=0.0):
   return limiter.update(model, speed, cruise, strength, enabled, overriding, previous_accel)
@@ -212,6 +234,24 @@ def test_persistent_single_point_curve_is_confirmed_on_nonuniform_model_grid():
   assert confirmed_frames[0] >= CURVE_CONFIRMATION_FRAMES - 1
   assert all(result.required_decel == 0.0 for result in results[:confirmed_frames[0]])
   assert results[confirmed_frames[0]].required_decel > 0.0
+
+
+def test_observed_entry_distance_jitter_still_confirms_same_world_curve():
+  limiter = CurveSpeedLimiter(1.8)
+  start_distance = 80.0
+  candidate = _CurveCandidate(10.0, MIN_CURVE_SPEED, start_distance, start_distance)
+  limiter._update_tracks([candidate])
+
+  # The live model moved the estimated curve entry 8.3 m more than ego travel.
+  # It is still a progressing world curve, not a feature fixed in prediction space.
+  track = None
+  for traveled in (5.5, 6.5, 7.5):
+    limiter.ego_distance = traveled
+    distance = start_distance - traveled - 8.3
+    candidate = _CurveCandidate(10.0, MIN_CURVE_SPEED, distance, distance)
+    _, track = limiter._update_tracks([candidate])
+
+  assert track is not None and track.confirmed
 
 
 def test_prediction_space_fixed_spike_never_confirms_as_a_world_curve():
@@ -526,13 +566,64 @@ def test_alternating_world_curves_are_tracked_independently():
 
 
 def test_lane_change_trajectory_does_not_enable_curve_braking():
-  model = model_with_curve(0.02, curve_start=8)
-  model.meta = SimpleNamespace(laneChangeState=log.LaneChangeState.laneChangeStarting)
+  model = model_with_s_lane_change()
 
   result = update(CurveSpeedLimiter(1.8), model)
 
   assert not result.active
   assert result.required_decel == 0.0
+
+
+def test_sustained_road_turn_mislabeled_as_lane_change_confirms_after_multiple_frames():
+  limiter = CurveSpeedLimiter(1.8)
+  model = model_with_curve(0.02, curve_start=8)
+  model.meta = SimpleNamespace(laneChangeState=log.LaneChangeState.laneChangeStarting)
+
+  results = [update(limiter, model) for _ in range(4)]
+
+  assert all(result.required_decel == 0.0 for result in results[:-1])
+  assert results[-1].active and results[-1].confirmed
+  assert results[-1].required_decel > 0.0
+  assert limiter.lane_change_road_turn
+
+
+def test_lane_change_holds_unconfirmed_road_curve_as_throttle_release_only():
+  limiter = CurveSpeedLimiter(1.8)
+  road_curve = update(limiter, model_with_curve(0.02, curve_start=8), previous_accel=0.6)
+  assert road_curve.active and not road_curve.confirmed
+  target_curve_speed = limiter.target_curve_speed
+
+  lane_change_model = model_with_s_lane_change(curvature=0.2)
+  held = update(limiter, lane_change_model, previous_accel=0.6)
+
+  assert held.active and not held.confirmed
+  assert held.required_decel == 0.0
+  assert limiter.target_curve_speed == target_curve_speed
+  assert limiter.lane_change_holding
+
+  controller = CurveAccelerationController()
+  cap = controller.update(held, 25.0, True, False, 0.6, 0.6)
+  assert cap.active
+  assert 0.0 <= cap.accel < 0.6
+
+
+def test_lane_change_holds_confirmed_road_curve_without_using_lane_change_path():
+  limiter = CurveSpeedLimiter(1.8)
+  road_curve = confirmed_update(
+    limiter, model_with_curve(0.003, curve_start=25), frames=12,
+    speed=25.0, cruise=35.0,
+  )
+  assert road_curve.active and road_curve.confirmed
+  target_curve_speed = limiter.target_curve_speed
+
+  lane_change_model = model_with_s_lane_change(curvature=0.2)
+  lane_change_model.meta.laneChangeState = log.LaneChangeState.laneChangeFinishing
+  held = update(limiter, lane_change_model, speed=25.0, cruise=35.0)
+
+  assert held.active and held.confirmed
+  assert held.required_decel > 0.0
+  assert limiter.target_curve_speed == target_curve_speed
+  assert limiter.lane_change_holding
 
 
 def test_missing_curve_near_target_releases_without_crossing_speed_floor():

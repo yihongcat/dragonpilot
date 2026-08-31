@@ -205,7 +205,9 @@ class LongitudinalPlanner:
 
       curve_log_format = "".join((
         "dp_curve_speed mode=%s enabled=%s active=%s confirmed=%s unreachable=%s ",
-        "cap_active=%s confirm_frames=%d override=%s strength=%d ",
+        "cap_active=%s confirm_frames=%d lane_hold=%s road_turn=%s turn_frames=%d turn_deg=%.1f ",
+        "candidates=%d limiting=%d tracks=%d ",
+        "override=%s strength=%d ",
         "v_ego=%.1f cruise=%.1f limit=%.1f curve=%.1f distance=%.1f required_decel=%.2f ",
         "curve_accel=%.2f cruise_accel=%.2f output_accel=%.2f source=%s",
       ))
@@ -213,6 +215,12 @@ class LongitudinalPlanner:
         curve_log_format,
         mode, curve_enabled, curve_limit.active, curve_limit.confirmed, curve_limit.unreachable,
         curve_accel_limit.active, self.curve_speed_limiter.confirmation_frames,
+        self.curve_speed_limiter.lane_change_holding,
+        self.curve_speed_limiter.lane_change_road_turn,
+        self.curve_speed_limiter.lane_change_road_turn_frames,
+        math.degrees(self.curve_speed_limiter.lane_change_turn_angle),
+        self.curve_speed_limiter.candidate_count, self.curve_speed_limiter.limiting_candidate_count,
+        len(self.curve_speed_limiter.tracks),
         curve_overriding, dp_curve_speed_reduction,
         v_ego * CV.MS_TO_KPH, v_cruise_setpoint * CV.MS_TO_KPH,
         finite_or_negative(curve_limit.speed) * CV.MS_TO_KPH,
