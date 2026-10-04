@@ -1,0 +1,52 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>录像管理 · dragonpilot</title>
+  <link rel="icon" href="/icons/icon-192x192.png">
+  <link rel="stylesheet" href="/css/recordings.css">
+  <script src="/js/recordings.js" defer></script>
+</head>
+<body>
+  <main>
+    <header><div><p class="eyebrow">DRAGONPILOT / 本地存储</p><h1>录像管理</h1></div><a href="/">返回 Dashy ↗</a></header>
+    <p class="intro">手机或电脑与设备连接同一 Wi-Fi，即可查看、导出和整理行车录像。</p>
+    <div id="status" role="status" aria-live="polite">正在读取设备存储…</div>
+
+    <section class="storage" aria-label="存储概况">
+      <div><span>可用空间</span><strong id="free">—</strong></div>
+      <div><span>录像与行车日志</span><strong id="recording-size">—</strong></div>
+      <div><span>全部空间</span><strong id="total">—</strong></div>
+      <progress id="usage" max="100" value="0" aria-label="存储使用率"></progress>
+      <p id="usage-label">—</p>
+    </section>
+
+    <section class="policy">
+      <div class="section-heading"><div><h2>自动整理</h2><p>按时间或容量删除最旧的已完成行程。</p></div><label class="toggle"><input id="auto" type="checkbox"> 开启</label></div>
+      <form id="policy-form">
+        <label>保留天数<input id="keep-days" type="number" min="0" max="365" step="1" value="7"><small>0 表示不按时间删除</small></label>
+        <label>录像容量上限（GB）<input id="max-gb" type="number" min="0" max="1024" step="1" value="20"><small>0 表示不设置容量上限</small></label>
+        <button id="save-policy" type="submit">保存设置</button>
+      </form>
+      <p class="note">设备会始终优先保留至少 5GB 或 10% 的可用空间（以较大者为准）。关闭自动整理后，空间不足时仍会清理旧录像。正在记录或导出的行程不会被删除。</p>
+    </section>
+
+    <section class="library">
+      <div class="section-heading"><div><h2>本地行程 <span id="route-count">0</span></h2><p>ZIP 导出包含整段行程的录像和日志，不会在设备上创建额外副本。</p></div><button id="refresh" class="secondary">刷新</button></div>
+      <div class="toolbar">
+        <label class="search">搜索行程<input id="search" type="search" placeholder="日期或行程编号"></label>
+        <label class="older">选择早于<select id="older-days"><option value="7">7 天</option><option value="30">30 天</option><option value="90">90 天</option></select></label>
+        <button id="select-old" class="secondary">选中旧行程</button>
+        <button id="delete" class="danger" disabled>删除所选（0）</button>
+      </div>
+      <div class="table-wrap"><table>
+        <thead><tr><th><input id="select-all" type="checkbox" aria-label="选择本页已完成行程"></th><th>行程 / 最后记录时间</th><th>大小</th><th>状态</th><th>操作</th></tr></thead>
+        <tbody id="routes"></tbody>
+      </table></div>
+      <div class="pagination"><button id="previous" class="secondary">上一页</button><span id="page-label"></span><button id="next" class="secondary">下一页</button></div>
+      <p class="note">删除不可恢复，请先导出需要保留的行程。可在停车后操作删除、设置和导出；行车途中导出会停止。预览使用低清道路录像，HEVC 原始录像可在导出后用支持该格式的播放器打开。</p>
+    </section>
+  </main>
+</body>
+</html>

@@ -48,8 +48,10 @@ from openpilot.cereal import messaging
 
 from openpilot.common.params import Params
 from openpilot.common.hardware import PC, HARDWARE
+from openpilot.common.hardware.hw import Paths
 from openpilot.system.ui.lib.multilang import multilang as base_multilang
 from dragonpilot.settings import SETTINGS
+from dragonpilot.dashy.recordings_api import setup_recordings_api
 
 try:
     from openpilot.common.version import get_build_metadata as _get_build_metadata
@@ -57,7 +59,7 @@ except Exception:
     _get_build_metadata = None
 
 # --- Configuration ---
-DEFAULT_DIR = os.path.realpath(os.path.join(os.path.dirname(__file__), '..') if PC else '/data/media/0/realdata')
+DEFAULT_DIR = os.path.realpath(Paths.log_root())
 WEB_DIST_PATH = os.path.join(os.path.dirname(__file__), "web", "dist")
 CAR_PARAMS_CACHE_TTL = 30  # seconds
 
@@ -69,7 +71,7 @@ class MockParams:
     _store = {}
     def get(self, key, default=None): return self._store.get(key, default)
     def get_bool(self, key, default=False): return bool(self._store.get(key)) if key in self._store else default
-    def put(self, key, value): self._store[key] = value
+    def put(self, key, value, block=False): self._store[key] = value
     def put_bool(self, key, value): self._store[key] = value
     def remove(self, key): self._store.pop(key, None)
     def check_key(self, key): return True
@@ -815,6 +817,8 @@ def setup_aiohttp_app(host: str, port: int, debug: bool):
     )
 
     app = web.Application(middlewares=[no_cache_middleware])
+    os.makedirs(DEFAULT_DIR, exist_ok=True)
+    setup_recordings_api(app, DEFAULT_DIR)
 
     # API routes
     app.router.add_get("/api/init", init_api)

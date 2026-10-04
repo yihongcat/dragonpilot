@@ -1,6 +1,9 @@
 from collections import namedtuple
 from pathlib import Path
 from collections.abc import Sequence
+import os
+import time
+from unittest.mock import patch
 
 import openpilot.system.loggerd.deleter as deleter
 from openpilot.system.loggerd.tests.loggerd_tests_common import UploaderTestCase
@@ -21,7 +24,9 @@ class TestDeleter(UploaderTestCase):
     self.f_type = "fcamera.hevc"
     super().openpilot_setup_method()
     self.fake_stats = Stats(f_bavail=0, f_blocks=10, f_frsize=4096)
-    deleter.os.statvfs = self.fake_statvfs  # ty: ignore[invalid-assignment]  # test double
+    stat_patch = patch('openpilot.system.loggerd.deleter.os.statvfs', side_effect=self.fake_statvfs)
+    stat_patch.start()
+    self.addCleanup(stat_patch.stop)
 
   def test_delete(self):
     f_path = self.make_file_with_data(self.seg_dir, self.f_type)
@@ -78,3 +83,43 @@ class TestDeleter(UploaderTestCase):
 
     assert deleter.deleter_step() == (True, None)
     assert f_path.exists(), "File deleted when locked"
+
+  def test_delete_abandoned_locked_segment_without_uploader(self):
+    f_path = self.make_file_with_data(self.seg_dir, self.f_type, lock=True)
+    stamp = time.time() - 1000  # noqa: TID251 -- test filesystem timestamps
+    for path in [f_path.parent, *f_path.parent.iterdir()]:
+      os.utime(path, (stamp, stamp))
+    assert deleter.deleter_step() == (True, str(f_path.parent))
+    assert not f_path.exists()
+
+  def test_never_delete_current_route_without_lock(self):
+    f_path = self.make_file_with_data(self.seg_dir, self.f_type)
+    self.params.put('CurrentRoute', self.seg_dir.rsplit('--', 1)[0], block=True)
+    self.params.put_bool('IsOffroad', False, block=True)
+    assert deleter.deleter_step() == (True, None)
+    assert f_path.exists()
+
+  def test_finished_route_can_be_deleted_when_parked(self):
+    f_path = self.make_file_with_data(self.seg_dir, self.f_type)
+    self.params.put('CurrentRoute', self.seg_dir.rsplit('--', 1)[0], block=True)
+    assert deleter.deleter_step() == (True, str(f_path.parent))
+    assert not f_path.exists()
+
+  def test_retention_runs_with_plenty_of_free_space(self):
+    f_path = self.make_file_with_data(self.seg_dir, self.f_type)
+    stamp = time.time() - 2 * 86400  # noqa: TID251 -- test filesystem timestamps
+    os.utime(f_path, (stamp, stamp))
+    self.params.put('dp_recording_policy', {'enabled': True, 'keep_days': 1, 'max_gb': 0}, block=True)
+    self.fake_stats = Stats(f_bavail=10 * 1024 ** 3 / 4096, f_blocks=10, f_frsize=4096)
+    assert deleter.deleter_step() == (True, str(f_path.parent))
+    assert not f_path.exists()
+
+  def test_quota_removes_whole_completed_drive(self):
+    first = self.make_file_with_data(self.seg_format.format(0), self.f_type)
+    second = self.make_file_with_data(self.seg_format.format(1), self.f_type)
+    with first.open('wb') as f:
+      f.truncate(1024 ** 3)
+    self.params.put('dp_recording_policy', {'enabled': True, 'keep_days': 0, 'max_gb': 1}, block=True)
+    self.fake_stats = Stats(f_bavail=10 * 1024 ** 3 / 4096, f_blocks=10, f_frsize=4096)
+    assert deleter.deleter_step() == (True, str(first.parent))
+    assert not first.exists() and not second.exists()

@@ -1,5 +1,6 @@
 import os
 import threading
+import time
 import logging
 import json
 from pathlib import Path
@@ -165,6 +166,11 @@ class TestUploader(UploaderTestCase):
 
   def test_clear_locks_on_startup(self, mocker):
     f_paths = self.gen_files(lock=True, boot=False)
+    # Only abandoned locks should be cleared. Live/recent locks stay intact.
+    stamp = time.time() - 1000  # noqa: TID251 -- test filesystem timestamps
+    for f_path in f_paths:
+      for path in [f_path.parent, *f_path.parent.iterdir()]:
+        os.utime(path, (stamp, stamp))
     locks_cleared = threading.Event()
 
     def clear_locks_and_signal(root):
