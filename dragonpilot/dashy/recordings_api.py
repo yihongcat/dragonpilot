@@ -15,10 +15,11 @@ from aiohttp import web
 
 from openpilot.cereal import log
 from openpilot.common.hardware import HARDWARE, PC
+from openpilot.system.loggerd.deleter import MIN_BYTES, MIN_PERCENT
 from openpilot.system.loggerd.recordings import (
-  RecordingPolicy, clear_stale_locks, delete_recording, export_recording,
+  GIB, RecordingPolicy, clear_stale_locks, delete_recording, export_recording,
   recording_inventory, recording_lock,
-  current_recording_route,
+  current_recording_route, open_recording_directories,
 )
 
 logger = logging.getLogger("dashy.recordings")
@@ -49,7 +50,47 @@ def current_route(params):
 
 def require_parked(params):
   if not params.get_bool("IsOffroad"):
-    raise web.HTTPConflict(text="Park the car before deleting, changing retention, or exporting recordings")
+    raise web.HTTPConflict(text="请停车后再切换录制、删除、修改设置或导出录像")
+
+
+def recording_budget(root):
+  usage = shutil.disk_usage(root)
+  reserve = max(MIN_BYTES, int(usage.total * MIN_PERCENT / 100))
+  return max(0, (usage.total - reserve) // GIB), usage.free - reserve
+
+
+def set_recording_enabled(params, root, enabled):
+  if type(enabled) is not bool:
+    raise web.HTTPBadRequest(text="录制开关必须为开启或关闭")
+  with recording_lock(root):
+    require_parked(params)
+    policy = RecordingPolicy.load(params)
+    if enabled:
+      budget, available = recording_budget(root)
+      if budget < 1 or available < GIB:
+        raise web.HTTPConflict(text="可用空间不足，请先清理旧录像再开启录制")
+      if open_recording_directories(root) is None:
+        raise web.HTTPConflict(text="暂时无法确认录像占用，自动清理检查未通过，请稍后重试")
+      policy = RecordingPolicy(True, policy.keep_days, min(policy.max_gb or 20, budget))
+      # Persist the cleanup policy before allowing the recorder to start.
+      require_parked(params)
+      policy.save(params)
+    require_parked(params)
+    params.put('DisableLogging', not enabled, block=True)
+    return {'recordingEnabled': enabled, 'policy': asdict(policy)}
+
+
+def set_recording_policy(params, root, policy):
+  with recording_lock(root):
+    require_parked(params)
+    if not params.get_bool('DisableLogging'):
+      budget, _ = recording_budget(root)
+      if not policy.enabled or not policy.max_gb:
+        raise web.HTTPConflict(text="录制开启时必须开启自动整理，并设置录像容量上限")
+      if policy.max_gb > budget:
+        raise web.HTTPBadRequest(text=f"当前设备录像容量上限不能超过 {budget}GB")
+    require_parked(params)
+    policy.save(params)
 
 
 async def json_body(request):
@@ -92,9 +133,18 @@ async def save_policy(request):
   params = request.app['cache'].params
   body = await json_body(request)
   policy = RecordingPolicy.parse(body)
-  require_parked(params)
-  await asyncio.to_thread(policy.save, params)
+  await asyncio.to_thread(set_recording_policy, params, request.app['recording_root'], policy)
   return web.json_response({"policy": asdict(policy)})
+
+
+@recording_api
+async def save_recording_enabled(request):
+  body = await json_body(request)
+  if set(body) != {'enabled'}:
+    raise web.HTTPBadRequest(text="请提供录制开关")
+  result = await asyncio.to_thread(set_recording_enabled, request.app['cache'].params,
+                                   request.app['recording_root'], body['enabled'])
+  return web.json_response(result)
 
 
 @recording_api
@@ -227,5 +277,6 @@ def setup_recordings_api(app, root):
   app['recording_root'] = str(Path(root).resolve())
   app.router.add_get('/api/recordings', list_recordings)
   app.router.add_post('/api/recordings/policy', save_policy)
+  app.router.add_post('/api/recordings/recording', save_recording_enabled)
   app.router.add_post('/api/recordings/delete', delete_routes)
   app.router.add_get('/api/recordings/{route_id}/download', download_route)

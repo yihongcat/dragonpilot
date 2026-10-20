@@ -51,7 +51,7 @@ from openpilot.common.hardware import PC, HARDWARE
 from openpilot.common.hardware.hw import Paths
 from openpilot.system.ui.lib.multilang import multilang as base_multilang
 from dragonpilot.settings import SETTINGS
-from dragonpilot.dashy.recordings_api import setup_recordings_api
+from dragonpilot.dashy.recordings_api import setup_recordings_api, set_recording_enabled, json_body as recording_json_body
 
 try:
     from openpilot.common.version import get_build_metadata as _get_build_metadata
@@ -489,12 +489,19 @@ async def save_param_api(request):
 
     cache: AppCache = request.app['cache']
     params = cache.params
-    data = await request.json()
+    data = await recording_json_body(request) if param_name == 'DisableLogging' else await request.json()
 
     if 'value' not in data:
         return web.json_response({'error': 'value is required in body'}, status=400)
 
-    _save_param(params, param_name, data['value'])
+    if param_name == 'DisableLogging':
+        if type(data['value']) is not bool:
+            raise web.HTTPBadRequest(text="录制开关必须为开启或关闭")
+        await asyncio.to_thread(set_recording_enabled, params, request.app['recording_root'], not data['value'])
+    elif param_name == 'dp_recording_policy':
+        raise web.HTTPForbidden(text="请在本地录像管理页面设置自动整理")
+    else:
+        _save_param(params, param_name, data['value'])
     cache.invalidate()
     logger.info(f"Param saved: {param_name}={data['value']}")
 

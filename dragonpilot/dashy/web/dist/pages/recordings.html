@@ -20,7 +20,11 @@
       <div><span>全部空间</span><strong id="total">—</strong></div>
       <progress id="usage" max="100" value="0" aria-label="存储使用率"></progress>
       <p id="usage-label">—</p>
-      <p id="recording-status">正在读取录制状态…</p>
+    </section>
+
+    <section class="recording">
+      <div class="section-heading"><div><h2>行车录像</h2><p id="recording-status">正在读取录制状态…</p></div><label class="toggle"><input id="recording-toggle" type="checkbox" disabled> 录制</label></div>
+      <p class="note">仅停车后可以切换。开启后，下次行车时保存道路录像和行车日志，并同时开启自动整理；超过保留期限或容量上限的旧录像会自动删除。关闭录制会保留已有文件。</p>
     </section>
 
     <section class="policy">
@@ -30,7 +34,7 @@
         <label>录像容量上限（GB）<input id="max-gb" type="number" min="0" max="1024" step="1" value="20"><small>0 表示不设置容量上限</small></label>
         <button id="save-policy" type="submit">保存设置</button>
       </form>
-      <p class="note">设备会始终优先保留至少 5GB 或 10% 的可用空间（以较大者为准）。关闭自动整理后，空间不足时仍会清理旧录像。正在记录或导出的行程不会被删除。</p>
+      <p class="note">录制开启时自动整理保持开启，并保留录像容量上限。设备在可用空间低于 5GB 或 10%（以较大者为准）时还会清理旧分段。正在记录或导出的文件不会被删除。</p>
     </section>
 
     <section class="library">
