@@ -82,6 +82,7 @@ async def list_recordings(request):
   result = await asyncio.to_thread(inventory)
   result['policy'] = asdict(RecordingPolicy.load(params))
   result['isOffroad'] = params.get_bool("IsOffroad")
+  result['recordingEnabled'] = not params.get_bool("DisableLogging")
   result['wifi'] = PC or await asyncio.to_thread(HARDWARE.get_network_type) == log.DeviceState.NetworkType.wifi
   return web.json_response(result)
 

@@ -30,6 +30,9 @@
     $("free").textContent = size(data.storage.free);
     $("total").textContent = size(data.storage.total);
     $("recording-size").textContent = size(data.storage.recordings);
+    $("recording-status").textContent = data.recordingEnabled
+      ? "录制已开启，行车时会保存录像和日志。"
+      : "录制已关闭，不会新增行车录像和路线日志；仍可管理已有文件。";
     const percent = 100 * data.storage.used / data.storage.total;
     $("usage").value = percent;
     $("usage-label").textContent = `已使用 ${percent.toFixed(0)}% · 录像与行车日志共 ${data.routes.length} 个行程`;

@@ -38,16 +38,19 @@ def client(root, params):
 def test_inventory_and_persistent_policy(tmp_path):
   make_segment(tmp_path)
   params = TestParams()
+  params.values['DisableLogging'] = True
 
   async def run():
     async with client(tmp_path, params) as browser:
       response = await browser.get('/api/recordings')
       result = await response.json()
       assert response.status == 200 and result['routes'][0]['id'] == ROUTE
+      assert result['recordingEnabled'] is False
       policy = {'enabled': True, 'keep_days': 14, 'max_gb': 10}
       assert (await browser.post('/api/recordings/policy', json=policy)).status == 200
       assert params.values['dp_recording_policy'] == policy
       assert (await (await browser.get('/api/recordings')).json())['policy'] == policy
+      assert params.values['DisableLogging'] is True
 
   asyncio.run(run())
 
