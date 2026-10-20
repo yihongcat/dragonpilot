@@ -62,6 +62,12 @@ def deleter_step(recover_locks: bool = True) -> tuple[bool, str | None]:
     return False, None
 
 
+def pause_recording_for_storage(params):
+  if not params.get_bool('DisableLogging'):
+    params.put('DisableLogging', True, block=True)
+    cloudlog.error('Recording paused: low storage and no safely reclaimable recording')
+
+
 def _deleter_step(recover_locks: bool) -> tuple[bool, str | None]:
   params = Params()
   current_route = current_recording_route(params)
@@ -79,6 +85,8 @@ def _deleter_step(recover_locks: bool) -> tuple[bool, str | None]:
     return False, None
   active_dirs = open_recording_directories(Paths.log_root())
   if active_dirs is None:
+    if out_of_space:
+      pause_recording_for_storage(params)
     return out_of_space, None
   current_segments = [d for d in dirs if current_route and d.startswith(current_route + "--") and d.rsplit('--', 1)[1].isdigit()]
   latest_segment = max(current_segments, key=lambda d: int(d.rsplit('--', 1)[1]), default=None)
@@ -109,6 +117,8 @@ def _deleter_step(recover_locks: bool) -> tuple[bool, str | None]:
       return True, delete_path
     except OSError:
       cloudlog.exception(f"issue deleting {delete_path}")
+  if out_of_space:
+    pause_recording_for_storage(params)
   return True, None
 
 

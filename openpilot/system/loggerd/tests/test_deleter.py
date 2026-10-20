@@ -85,6 +85,25 @@ class TestDeleter(UploaderTestCase):
     assert deleter.deleter_step() == (True, None)
     assert f_path.exists(), "File deleted when locked"
 
+  def test_low_storage_pauses_recording_when_all_files_protected(self):
+    f_path = self.make_file_with_data(self.seg_dir, self.f_type, lock=True)
+    self.params.put('DisableLogging', False, block=True)
+    assert deleter.deleter_step() == (True, None)
+    assert self.params.get_bool('DisableLogging')
+    assert f_path.exists()
+
+  def test_low_storage_pauses_recording_when_process_inspection_fails(self):
+    self.params.put('DisableLogging', False, block=True)
+    with patch('openpilot.system.loggerd.deleter.open_recording_directories', return_value=None):
+      assert deleter.deleter_step(recover_locks=False) == (True, None)
+    assert self.params.get_bool('DisableLogging')
+
+  def test_successful_cleanup_does_not_pause_recording(self):
+    f_path = self.make_file_with_data(self.seg_dir, self.f_type)
+    self.params.put('DisableLogging', False, block=True)
+    assert deleter.deleter_step() == (True, str(f_path.parent))
+    assert not self.params.get_bool('DisableLogging')
+
   def test_delete_abandoned_locked_segment_without_uploader(self):
     f_path = self.make_file_with_data(self.seg_dir, self.f_type, lock=True)
     stamp = time.time() - 1000  # noqa: TID251 -- test filesystem timestamps

@@ -12,6 +12,12 @@ from dragonpilot.dashy import recordings_api as api
 from openpilot.system.loggerd.tests.test_recordings import ROUTE, OTHER, make_segment
 
 
+@pytest.fixture(autouse=True)
+def recording_disk_space(monkeypatch):
+  # Activation checks must not depend on the development host's free space.
+  monkeypatch.setattr(api.shutil, 'disk_usage', lambda root: SimpleNamespace(total=30 * api.GIB, free=25 * api.GIB, used=5 * api.GIB))
+
+
 class TestParams:
   __test__ = False
 

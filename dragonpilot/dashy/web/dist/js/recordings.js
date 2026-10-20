@@ -97,9 +97,11 @@
       }
       if (!quiet) status(!data.isOffroad ? "设备正在行车，删除、设置和导出已暂停。" : !data.wifi ? "已读取本地录像。连接 Wi-Fi 后可以导出。" : "设备已连接 Wi-Fi，可在停车后整理和导出录像。");
       render();
+      return true;
     } catch (e) {
       if (data) data.isOffroad = false;
       render(); status(`无法连接设备：${e.message}`, true);
+      return false;
     }
   }
   ["auto", "keep-days", "max-gb"].forEach(id => $(id).addEventListener("input", () => { policyDirty = true; }));
@@ -111,8 +113,9 @@
     if (enabled && !window.confirm("开启录制后会同时开启自动整理，超过保留期限或容量上限的旧录像会自动删除。确认开启录制？")) return;
     busy = true; render();
     try {
-      await api("/recording", { enabled }); policyDirty = false; await refresh(true);
-      status(enabled ? "录制已开启，下次行车时开始保存；自动整理已开启。" : "录制已关闭，已有录像仍然保留。");
+      const result = await api("/recording", { enabled });
+      data.recordingEnabled = result.recordingEnabled; data.policy = result.policy; policyDirty = false;
+      if (await refresh(true)) status(enabled ? "录制已开启，下次行车时开始保存；自动整理已开启。" : "录制已关闭，已有录像仍然保留。");
     } catch (err) { status(`切换失败：${err.message}`, true); }
     finally { busy = false; render(); }
   });
