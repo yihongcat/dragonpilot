@@ -226,6 +226,11 @@ function launch {
   # handle pythonpath
   ln -sfn $(pwd) /data/pythonpath
   export PYTHONPATH="$PWD"
+  # AGNOS ships a read-only Python environment. Optional dependencies installed
+  # on the persistent data partition must also be available after a restart.
+  if [ -d /data/python_deps ]; then
+    export PYTHONPATH="$PYTHONPATH:/data/python_deps"
+  fi
 
   # submodule package symlinks for PYTHONPATH imports on device.
   # on PC these come from editable installs via pyproject.toml / uv.
