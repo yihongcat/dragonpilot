@@ -117,17 +117,32 @@ def open_recording_directories(root: str, proc_root: str = "/proc") -> set[str] 
     except (FileNotFoundError, ProcessLookupError):
       continue
     except PermissionError:
-      # User systemd and sd-pam deliberately hide their descriptors, but do
-      # not record video. Unknown inaccessible processes still block recovery.
-      try:
-        if (proc / 'comm').read_text().strip() in ('systemd', '(sd-pam)'):
-          continue
-      except OSError:
-        pass
+      # AGNOS system daemons drop privileges to comma and disable ptrace.
+      # They do not use recording files; their protected fd tables must not
+      # disable all cleanup. Check both name and command, not name alone.
+      if is_recording_unrelated_service(proc):
+        continue
       return None
     except OSError:
       return None
   return active
+
+
+def is_recording_unrelated_service(proc: Path) -> bool:
+  try:
+    name = (proc / 'comm').read_text().strip()
+    command = (proc / 'cmdline').read_bytes().rstrip(b'\0').split(b'\0')
+  except OSError:
+    return False
+  if name == 'sshd':
+    return len(command) == 1 and re.fullmatch(rb'sshd: [\w.-]+@(?:notty|pts/[0-9]+)', command[0]) is not None
+  commands = {
+    'logd': [[b'/sbin/logd']],
+    'qseecomd': [[b'/usr/bin/qseecomd']],
+    '(sd-pam)': [[b'(sd-pam)']],
+    'systemd': [[b'/lib/systemd/systemd', b'--user'], [b'/usr/lib/systemd/systemd', b'--user']],
+  }
+  return command in commands.get(name, [])
 
 
 def clear_stale_locks(root: str, current_route: str = "", now: float | None = None) -> int:

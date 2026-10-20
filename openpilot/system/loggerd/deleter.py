@@ -80,11 +80,17 @@ def _deleter_step(recover_locks: bool) -> tuple[bool, str | None]:
   active_dirs = open_recording_directories(Paths.log_root())
   if active_dirs is None:
     return out_of_space, None
+  current_segments = [d for d in dirs if current_route and d.startswith(current_route + "--") and d.rsplit('--', 1)[1].isdigit()]
+  latest_segment = max(current_segments, key=lambda d: int(d.rsplit('--', 1)[1]), default=None)
 
   # remove the earliest directory we can
   for delete_dir in sorted(dirs, key=lambda d: (d in DELETE_LAST, d in preserved_dirs)):
     delete_path = os.path.join(Paths.log_root(), delete_dir)
-    if delete_dir in active_dirs or os.path.islink(delete_path) or (current_route and delete_dir.startswith(current_route + "--")):
+    if delete_dir in active_dirs or os.path.islink(delete_path) or delete_dir == latest_segment:
+      continue
+    # Emergency cleanup can reclaim closed segments of a long ongoing drive.
+    # Keep the newest segment protected even before its recorder lock appears.
+    if not out_of_space and current_route and delete_dir.startswith(current_route + "--"):
       continue
     if not out_of_space and delete_dir not in retention_dirs:
       continue

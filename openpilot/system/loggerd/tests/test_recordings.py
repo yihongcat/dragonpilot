@@ -2,6 +2,7 @@ import json
 import os
 import time
 from dataclasses import asdict
+from pathlib import Path
 from unittest.mock import Mock
 
 import pytest
@@ -9,6 +10,7 @@ import pytest
 from openpilot.system.loggerd.recordings import (
   GIB, LOCK_GRACE_SECONDS, RecordingPolicy, clear_stale_locks, delete_recording,
   export_recording, recording_inventory, recording_lock, retention_candidates,
+  open_recording_directories,
 )
 
 ROUTE = "00000004--0ac3964c96"
@@ -52,6 +54,51 @@ def test_unreadable_process_inventory_preserves_locks(tmp_path, monkeypatch):
   make_segment(tmp_path, age=1000, locked=True)
   monkeypatch.setattr('openpilot.system.loggerd.recordings.open_recording_directories', lambda root: None)
   assert clear_stale_locks(str(tmp_path)) == 0
+
+
+@pytest.mark.parametrize('name,command,unrelated', [
+  ('logd', b'/sbin/logd\0', True),
+  ('qseecomd', b'/usr/bin/qseecomd\0', True),
+  ('sshd', b'sshd: comma@notty\0\0', True),
+  ('sshd', b'sshd: comma@pts/0\0', True),
+  ('systemd', b'/lib/systemd/systemd\0--user\0', True),
+  ('(sd-pam)', b'(sd-pam)\0', True),
+  ('loggerd', b'./loggerd\0', False),
+  ('python', b'python\0-m\0dragonpilot.dashy.serverd\0', False),
+  ('logd', b'python\0custom_recorder.py\0', False),
+  ('sshd', b'sshd: comma@notty unknown\0', False),
+])
+def test_protected_process_tables_do_not_block_known_system_services(tmp_path, monkeypatch, name, command, unrelated):
+  root, proc_root = tmp_path / 'recordings', tmp_path / 'proc'
+  root.mkdir()
+  process = proc_root / '123'
+  process.mkdir(parents=True)
+  (process / 'comm').write_text(name)
+  (process / 'cmdline').write_bytes(command)
+  segment = make_segment(root, age=1000, locked=True)
+  original_iterdir = Path.iterdir
+
+  def protected_iterdir(path):
+    if path == process / 'fd':
+      raise PermissionError('AGNOS protected process')
+    return original_iterdir(path)
+
+  monkeypatch.setattr(Path, 'iterdir', protected_iterdir)
+  scan = open_recording_directories
+  monkeypatch.setattr('openpilot.system.loggerd.recordings.open_recording_directories',
+                      lambda path: scan(path, str(proc_root)))
+  assert scan(str(root), str(proc_root)) == (set() if unrelated else None)
+  assert clear_stale_locks(str(root)) == int(unrelated)
+  assert (segment / 'rlog.lock').exists() is not unrelated
+  assert recording_inventory(str(root))[0]['locked'] is not unrelated
+  candidates = retention_candidates(str(root), RecordingPolicy(True, 1, 0), now=time.time() + 86400)  # noqa: TID251
+  assert candidates == ({segment.name} if unrelated else set())
+  if unrelated:
+    assert delete_recording(str(root), ROUTE) > 0
+    assert not segment.exists()
+  else:
+    with pytest.raises(BlockingIOError):
+      delete_recording(str(root), ROUTE)
 
 
 def test_symlink_cannot_escape_recording_root(tmp_path):

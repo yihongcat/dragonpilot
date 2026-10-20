@@ -2,6 +2,7 @@ from collections import namedtuple
 from pathlib import Path
 from collections.abc import Sequence
 import os
+import tempfile
 import time
 from unittest.mock import patch
 
@@ -92,12 +93,66 @@ class TestDeleter(UploaderTestCase):
     assert deleter.deleter_step() == (True, str(f_path.parent))
     assert not f_path.exists()
 
+  def test_system_service_permission_error_still_allows_emergency_cleanup(self):
+    from openpilot.system.loggerd.recordings import open_recording_directories
+    f_path = self.make_file_with_data(self.seg_dir, self.f_type, lock=True)
+    stamp = time.time() - 1000  # noqa: TID251 -- test filesystem timestamps
+    for path in [f_path.parent, *f_path.parent.iterdir()]:
+      os.utime(path, (stamp, stamp))
+    temporary_proc = tempfile.TemporaryDirectory()
+    self.addCleanup(temporary_proc.cleanup)
+    proc_root = Path(temporary_proc.name)
+    process = proc_root / '123'
+    process.mkdir(parents=True)
+    (process / 'comm').write_text('logd')
+    (process / 'cmdline').write_bytes(b'/sbin/logd\0')
+    original_iterdir = Path.iterdir
+
+    def protected_iterdir(path):
+      if path == process / 'fd':
+        raise PermissionError('AGNOS protected process')
+      return original_iterdir(path)
+
+    def scan(root):
+      return open_recording_directories(root, str(proc_root))
+
+    with patch.object(Path, 'iterdir', protected_iterdir), \
+         patch('openpilot.system.loggerd.recordings.open_recording_directories', side_effect=scan), \
+         patch('openpilot.system.loggerd.deleter.open_recording_directories', side_effect=scan):
+      assert deleter.deleter_step() == (True, str(f_path.parent))
+      assert not f_path.exists()
+
   def test_never_delete_current_route_without_lock(self):
     f_path = self.make_file_with_data(self.seg_dir, self.f_type)
     self.params.put('CurrentRoute', self.seg_dir.rsplit('--', 1)[0], block=True)
     self.params.put_bool('IsOffroad', False, block=True)
     assert deleter.deleter_step() == (True, None)
     assert f_path.exists()
+
+  def test_long_drive_emergency_reclaims_only_completed_segments(self):
+    first = self.make_file_with_data(self.seg_format.format(0), self.f_type)
+    held = self.make_file_with_data(self.seg_format.format(1), self.f_type)
+    locked = self.make_file_with_data(self.seg_format.format(2), self.f_type, lock=True)
+    latest = self.make_file_with_data(self.seg_format.format(10), self.f_type)
+    self.params.put('CurrentRoute', self.seg_format.rsplit('--', 1)[0], block=True)
+    self.params.put_bool('IsOffroad', False, block=True)
+    with held.open('rb'):
+      assert deleter.deleter_step() == (True, str(first.parent))
+      assert deleter.deleter_step() == (True, None)
+    assert not first.exists()
+    assert held.exists() and locked.exists() and latest.exists()
+
+  def test_retention_keeps_entire_current_route_when_space_available(self):
+    first = self.make_file_with_data(self.seg_format.format(0), self.f_type)
+    self.make_file_with_data(self.seg_format.format(10), self.f_type)
+    self.params.put('CurrentRoute', self.seg_format.rsplit('--', 1)[0], block=True)
+    self.params.put_bool('IsOffroad', False, block=True)
+    self.params.put('dp_recording_policy', {'enabled': True, 'keep_days': 0, 'max_gb': 1}, block=True)
+    with first.open('wb') as f:
+      f.truncate(2 * 1024 ** 3)
+    self.fake_stats = Stats(f_bavail=10 * 1024 ** 3 / 4096, f_blocks=10, f_frsize=4096)
+    assert deleter.deleter_step() == (False, None)
+    assert first.exists()
 
   def test_finished_route_can_be_deleted_when_parked(self):
     f_path = self.make_file_with_data(self.seg_dir, self.f_type)
