@@ -61,6 +61,7 @@ run_unit_tests() {
   stage "Gate 1: camera capability, UI/manager startup, planner compatibility, and curve-deceleration tests"
   uv run --python 3.12 --with pytest pytest -q \
     openpilot/system/hardware/tests/test_capabilities.py \
+    openpilot/system/manager/test/test_recording_policy.py \
     openpilot/system/ui/lib/tests/test_application.py \
     dragonpilot/dashy/tests/test_serverd_startup.py \
     dragonpilot/dashy/tests/test_recordings_api.py \
