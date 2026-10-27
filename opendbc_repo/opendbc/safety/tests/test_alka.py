@@ -273,7 +273,7 @@ class TestALKAHyundai(TestALKABase):
   """Test ALKA functionality for Hyundai (Main only tracking)."""
 
   def setUp(self):
-    self.packer = CANPackerSafety("hyundai_kia_generic_generated")
+    self.packer = CANPackerSafety("hyundai_can_generated")
     self.safety = libsafety_py.libsafety
     self.safety.set_safety_hooks(CarParams.SafetyModel.hyundai, 0)
     self.safety.init_tests()
@@ -319,7 +319,7 @@ class TestALKAHyundaiCameraSCC(TestALKABase):
   HYUNDAI_PARAM_CAMERA_SCC = 8
 
   def setUp(self):
-    self.packer = CANPackerSafety("hyundai_kia_generic_generated")
+    self.packer = CANPackerSafety("hyundai_can_generated")
     self.safety = libsafety_py.libsafety
     self.safety.set_safety_hooks(CarParams.SafetyModel.hyundai, self.HYUNDAI_PARAM_CAMERA_SCC)
     self.safety.init_tests()
@@ -463,7 +463,7 @@ class TestALKAHyundaiLegacy(TestALKABase):
   """Test ALKA functionality for Hyundai Legacy (Main only tracking)."""
 
   def setUp(self):
-    self.packer = CANPackerSafety("hyundai_kia_generic_generated")
+    self.packer = CANPackerSafety("hyundai_can_generated")
     self.safety = libsafety_py.libsafety
     self.safety.set_safety_hooks(CarParams.SafetyModel.hyundaiLegacy, 0)
     self.safety.init_tests()
