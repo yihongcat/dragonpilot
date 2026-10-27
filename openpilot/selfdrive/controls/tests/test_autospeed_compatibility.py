@@ -75,6 +75,17 @@ def test_extensions_require_both_opt_in_and_supported_longitudinal(setup_planner
   assert subject.dp_extensions is None
 
 
+def test_custom_stop_distance_requires_explicit_opt_in(setup_planner):
+  CP, sm, mpc = setup_planner
+  subject = planner.LongitudinalPlanner(CP, init_v=20.0)
+  subject.update(sm, dp_stop_distance=2, dp_extensions_enabled=True)
+  assert subject.dp_extensions is not None
+  mpc.update.assert_called_once_with(sm['radarState'], personality=sm['selfdriveState'].personality, stop_distance=2)
+  subject.update(sm, dp_stop_distance=2, dp_extensions_enabled=False)
+  assert subject.dp_extensions is None
+  mpc.update.assert_called_with(sm['radarState'], personality=sm['selfdriveState'].personality)
+
+
 def test_toyota_bsm_and_dp_sdsu_flags_are_independent():
   from opendbc.car.toyota.values import ToyotaFlags
   assert not (ToyotaFlags.HAS_BSM & ToyotaFlags.SDSU)
