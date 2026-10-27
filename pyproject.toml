@@ -20,6 +20,7 @@ dependencies = [
   "requests",     # many one-off uses
   "tqdm",         # cars (fw_versions.py) on start + many one-off uses
   "aiohttp",      # dragonpilot dashy web server
+  "qrcode[pil]",  # dragonpilot device UI: Dashy QR code
 
   # core
   "scons",
