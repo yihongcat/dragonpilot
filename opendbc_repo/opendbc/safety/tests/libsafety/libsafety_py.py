@@ -40,8 +40,10 @@ def _build_libsafety(release: bool = False) -> str:
   return libsafety_so
 
 
-def cdef_from_file(path: Path) -> str:
-  source = path.read_text()
+def cdef_from_file(path: Path, preprocess: bool = False) -> str:
+  # DP also builds classic-CAN firmware. Resolve its conditional packet size
+  # with the same CANFD definition used by this test library.
+  source = subprocess.check_output(['cc', '-E', '-P', '-DCANFD', '-x', 'c', str(path)], text=True) if preprocess else path.read_text()
   source = re.sub(r"//[^\n]*|/\*.*?\*/", "", source, flags=re.DOTALL)
   source = re.sub(r"__attribute__\(\(.*\)\)", "", source)
 
@@ -54,7 +56,7 @@ def cdef_from_file(path: Path) -> str:
 
 ffi = FFI()
 safety_dir = Path(libsafety_dir).parents[1]
-ffi.cdef(cdef_from_file(safety_dir / "can.h"), packed=True)
+ffi.cdef(cdef_from_file(safety_dir / "can.h", preprocess=True), packed=True)
 for path in (safety_dir / "declarations.h", safety_dir / "ignition.h", Path(libsafety_dir) / "safety.c"):
   ffi.cdef(cdef_from_file(path))
 

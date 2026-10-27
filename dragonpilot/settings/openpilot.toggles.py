@@ -81,7 +81,7 @@ ITEMS = [
     "section": _SEC, "key": "InitialCruiseSpeedKph", "type": "spin_button_item",
     "title": lambda: tr("Initial Max Speed (km/h)"),
     "description": lambda: tr("Maximum speed on engagement. Your current speed is used if higher. Resume restores the previous maximum."),
-    "condition": _DASHY, "default": "40", "min_val": 0, "max_val": 145, "step": 5,
+    "condition": _DASHY, "default": "40", "min_val": 40, "max_val": 145, "step": 5,
   },
   {
     "section": _SEC, "key": "LongitudinalPersonality", "type": "text_spin_button_item",
