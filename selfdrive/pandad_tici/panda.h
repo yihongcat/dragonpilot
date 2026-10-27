@@ -11,9 +11,13 @@
 
 #include "cereal/gen/cpp/car.capnp.h"
 #include "cereal/gen/cpp/log.capnp.h"
-#include "panda/board/health.h"
-#include "panda/board/can.h"
+// This backend talks to panda_tici firmware, which retains its legacy wire protocol.
+#include "panda_tici/board/health.h"
+#include "panda_tici/board/can.h"
 #include "selfdrive/pandad_tici/panda_comms.h"
+
+static_assert(HEALTH_PACKET_VERSION == 17 && sizeof(health_t) == 57, "panda_tici health wire protocol changed");
+static_assert(CAN_PACKET_VERSION == 4, "panda_tici CAN wire protocol changed");
 
 #define USB_TX_SOFT_LIMIT   (0x100U)
 #define USBPACKET_MAX_SIZE  (0x40)
