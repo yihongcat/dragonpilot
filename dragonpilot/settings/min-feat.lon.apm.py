@@ -8,6 +8,7 @@ ITEMS = [
     "title": lambda: tr("Adaptive Personality Mode (APM)"),
     "description": lambda: tr("Automatically switches personality to \"Aggressive\" below 30 km/h and restores your selected personality above 40 km/h."),
     "condition": "openpilotLongitudinalControl",
+    "depends_on": "dp_lon_extensions_enabled == 1",
     "flags": "PERSISTENT",
     "param_type": "BOOL",
     "default": "0",

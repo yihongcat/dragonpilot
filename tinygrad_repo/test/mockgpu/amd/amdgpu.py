@@ -131,7 +131,8 @@ class PM4Executor(AMDQueue):
     _ = self._next_dword() # ev
 
     ptr = to_mv(self.gpu.translate_addr(addr_lo + (addr_hi << 32)), 8)
-    if mem_data_sel == 1 or mem_data_sel == 2: ptr.cast('Q')[0] = val
+    if mem_data_sel == 1: ptr.cast('I')[0] = val & 0xffffffff
+    elif mem_data_sel == 2: ptr.cast('Q')[0] = val
     elif mem_data_sel == 3:
       if mem_event_type == CACHE_FLUSH_AND_INV_TS_EVENT: ptr.cast('Q')[0] = int(time.perf_counter() * 1e8)
       else: raise RuntimeError(f"Unknown {mem_data_sel=} {mem_event_type=}")
@@ -283,7 +284,7 @@ class SDMAExecutor(AMDQueue):
 
   def _execute_fence(self):
     struct = sdma_pkts.fence.from_address(self.base + self.rptr[0] % self.size)
-    to_mv(self.gpu.translate_addr(struct.addr), 8).cast('Q')[0] = struct.data
+    to_mv(self.gpu.translate_addr(struct.addr), 4).cast('I')[0] = struct.data
     self.rptr[0] += ctypes.sizeof(struct)
 
   def _execute_trap(self):
@@ -326,8 +327,11 @@ class SDMAExecutor(AMDQueue):
 
   def _execute_copy(self):
     struct = sdma_pkts.copy_linear.from_address(self.base + self.rptr[0] % self.size)
-    count_cnt = to_mv(self.base + self.rptr[0] % self.size + 4, 4).cast('I')[0] & 0x3FFFFFFF
-    ctypes.memmove(self.gpu.translate_addr(struct.dst_addr), self.gpu.translate_addr(struct.src_addr), count_cnt + 1)
+    count, off = (to_mv(self.base + self.rptr[0] % self.size + 4, 4).cast('I')[0] & 0x3FFFFFFF) + 1, 0
+    while off < count: # a page at a time: the physical pages of a range needn't be contiguous
+      n = min(count - off, 0x1000 - ((struct.src_addr + off) & 0xfff), 0x1000 - ((struct.dst_addr + off) & 0xfff))
+      ctypes.memmove(self.gpu.translate_addr(struct.dst_addr + off), self.gpu.translate_addr(struct.src_addr + off), n)
+      off += n
     self.rptr[0] += ctypes.sizeof(struct)
 
 class AMDGPURegisters:
@@ -337,7 +341,7 @@ class AMDGPURegisters:
     self.regs: dict[tuple[int, int], int] = {}
   def __getitem__(self, addr:int) -> int:
     if addr == regGRBM_GFX_INDEX: return self.grbm_index
-    if regCPG_PERFCOUNTER1_LO < addr < regGUS_PERFCOUNTER_HI:
+    if regCPG_PERFCOUNTER1_LO <= addr <= regGUS_PERFCOUNTER_HI:
       assert self.regs[(regCP_PERFMON_CNTL, 0)] == 0x401, "read mode should be enabled"
       return addr << 16 | self.grbm_index
     return self.regs[(addr, getbits(self.grbm_index, 16, 23))]

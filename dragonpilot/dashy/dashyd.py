@@ -181,7 +181,7 @@ def extract_selfdrive_state(sm):
     return {
         'enabled': bool(ss.enabled),
         'activeOverride': int(safe_get(ss, 'activeOverride', 0)),
-        'experimentalMode': bool(ss.experimentalMode),
+        'autospeed': True,
         'alertText1': str(ss.alertText1),
         'alertText2': str(ss.alertText2),
         'alertSize': str(ss.alertSize),

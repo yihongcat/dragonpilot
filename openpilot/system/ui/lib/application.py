@@ -14,7 +14,7 @@ import subprocess
 from contextlib import contextmanager
 from collections.abc import Callable
 from collections import deque
-from enum import StrEnum
+from enum import IntEnum, StrEnum
 from pathlib import Path
 from typing import NamedTuple
 from importlib.resources import as_file, files
@@ -144,6 +144,18 @@ def _font_codepoints(font_weight: FontWeight, lang_code: str) -> list[int]:
   else:
     chars.update(_translation_chars(lang_code))
   return sorted(map(ord, chars))
+
+
+class TextAlignment(IntEnum):
+  LEFT = 0
+  CENTER = 1
+  RIGHT = 2
+
+
+class TextAlignmentVertical(IntEnum):
+  TOP = 0
+  MIDDLE = 1
+  BOTTOM = 2
 
 
 def font_fallback(font: rl.Font) -> rl.Font:
@@ -374,7 +386,6 @@ class GuiApplication:
       rl.set_target_fps(0 if OFFSCREEN or vblank_control else fps)
 
       self._target_fps = fps
-      self._set_styles()
       self._load_fonts()
       self._patch_text_functions()
       self._patch_scissor_mode()
@@ -648,8 +659,10 @@ class GuiApplication:
 
         # Store all mouse events for the current frame
         self._mouse_events = self._mouse.get_events()
-        if len(self._mouse_events) > 0:
-          self._last_mouse_event = self._mouse_events[-1]
+        # ignore additional fingers to avoid jumping
+        for mouse_event in self._mouse_events:
+          if mouse_event.slot == 0:
+            self._last_mouse_event = mouse_event
 
         # Skip rendering when screen is off
         if not self._should_render:
@@ -758,7 +771,7 @@ class GuiApplication:
     # Load only the active language. Asian languages use the source OpFont OTF
     # directly, avoiding the generated .fnt files removed by upstream.
     self._active_lang_code = multilang.language
-    rl.gui_set_font(self.font(FontWeight.NORMAL))
+    self.font(FontWeight.NORMAL)
 
   def on_language_changed(self, lang_code: str):
     # Map old texture IDs → weights so we can remap stale references
@@ -770,21 +783,14 @@ class GuiApplication:
     for weight in old_weight_by_texture.values():
       self.font(weight)
     # Carry forward existing remap + add new entries (weights are stable across switches)
-    self._font_remap = dict(self._font_remap) | {tid: w for tid, w in old_weight_by_texture.items()}
+    self._font_remap = dict(self._font_remap) | dict(old_weight_by_texture)
     # Now safe to unload old fonts
     for f in old_fonts:
       rl.unload_font(f)
-    rl.gui_set_font(self.font(FontWeight.NORMAL))
     from openpilot.system.ui.lib import text_measure, wrap_text
     text_measure._cache.clear()
     wrap_text._cache.clear()
 
-  def _set_styles(self):
-    rl.gui_set_style(rl.GuiControl.DEFAULT, rl.GuiControlProperty.BORDER_WIDTH, 0)
-    rl.gui_set_style(rl.GuiControl.DEFAULT, rl.GuiDefaultProperty.TEXT_SIZE, DEFAULT_TEXT_SIZE)
-    rl.gui_set_style(rl.GuiControl.DEFAULT, rl.GuiDefaultProperty.BACKGROUND_COLOR, rl.color_to_int(rl.BLACK))
-    rl.gui_set_style(rl.GuiControl.DEFAULT, rl.GuiControlProperty.TEXT_COLOR_NORMAL, rl.color_to_int(DEFAULT_TEXT_COLOR))
-    rl.gui_set_style(rl.GuiControl.DEFAULT, rl.GuiControlProperty.BASE_COLOR_NORMAL, rl.color_to_int(rl.Color(50, 50, 50, 255)))
 
   def _patch_text_functions(self):
     # Wrap pyray text APIs to apply a global text size scale so our px sizes match Qt

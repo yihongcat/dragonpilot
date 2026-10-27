@@ -280,7 +280,6 @@ _PARAM_SETTINGS = _build_param_setting_map()
 _CONTROL_PARAMS = {
     'dp_dev_go_off_road',   # Controls tab: force-offroad toggle
     'DoReboot',             # Controls tab: reboot button
-    'ExperimentalMode',     # Tesla HUD: tap set-speed circle to toggle
 }
 
 

@@ -4,7 +4,8 @@ from openpilot.common.params import Params
 from openpilot.common.realtime import Priority, config_realtime_process
 from openpilot.common.swaglog import cloudlog
 from openpilot.selfdrive.controls.lib.ldw import LaneDepartureWarning
-from openpilot.selfdrive.controls.lib.longitudinal_planner import LongitudinalPlanner, DPFlags
+from openpilot.selfdrive.controls.lib.longitudinal_planner import LongitudinalPlanner
+from dragonpilot.selfdrive.controls.lib.longitudinal_extensions import DPFlags
 import openpilot.cereal.messaging as messaging
 
 
@@ -19,27 +20,25 @@ def main():
   ldw = LaneDepartureWarning()
   longitudinal_planner = LongitudinalPlanner(CP)
   pm = messaging.PubMaster(['longitudinalPlan', 'driverAssistance'])
-  sm = messaging.SubMaster(['carControl', 'carState', 'controlsState', 'vehicleParameters', 'radarState', 'modelV2', 'selfdriveState'],
+  sm = messaging.SubMaster(['carControl', 'carState', 'controlsState', 'radarState', 'modelV2', 'selfdriveState'],
                            poll='modelV2')
 
-  dp_flags = 0
-  dp_curve_speed_reduction = int(params.get("dp_lon_curve_speed_reduction") or 0)
-  dp_stop_distance = int(params.get("dp_lon_stop_distance") or 6)
+  def read_dp_options():
+    flags = 0
+    for key, flag in (("dp_lon_acm", DPFlags.ACM), ("dp_lon_aem", DPFlags.AEM), ("dp_lon_apm", DPFlags.APM)):
+      if params.get_bool(key):
+        flags |= flag
+    return (params.get_bool("dp_lon_extensions_enabled"), flags,
+            int(params.get("dp_lon_curve_speed_reduction") or 0), int(params.get("dp_lon_stop_distance") or 6))
 
-  if params.get_bool("dp_lon_acm"):
-    dp_flags |= DPFlags.ACM
-  if params.get_bool("dp_lon_aem"):
-    dp_flags |= DPFlags.AEM
-  if params.get_bool("dp_lon_apm"):
-    dp_flags |= DPFlags.APM
+  dp_enabled, dp_flags, dp_curve_speed_reduction, dp_stop_distance = read_dp_options()
 
   while True:
     sm.update()
     if sm.updated['modelV2']:
       if sm.frame % 20 == 0:
-        dp_curve_speed_reduction = int(params.get("dp_lon_curve_speed_reduction") or 0)
-        dp_stop_distance = int(params.get("dp_lon_stop_distance") or 6)
-      longitudinal_planner.update(sm, dp_flags, dp_curve_speed_reduction, dp_stop_distance)
+        dp_enabled, dp_flags, dp_curve_speed_reduction, dp_stop_distance = read_dp_options()
+      longitudinal_planner.update(sm, dp_flags, dp_curve_speed_reduction, dp_stop_distance, dp_extensions_enabled=dp_enabled)
       longitudinal_planner.publish(sm, pm)
 
       ldw.update(sm.frame, sm['modelV2'], sm['carState'], sm['carControl'])

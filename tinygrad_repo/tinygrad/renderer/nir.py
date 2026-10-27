@@ -1,8 +1,8 @@
 from typing import Callable, Any
 from tinygrad.dtype import AddrSpace, DType, dtypes, truncate
-from tinygrad.helpers import DEBUG, OSX, unwrap, fromimport, Target, is_image_shape
-from tinygrad.renderer import Renderer
-from tinygrad.renderer.cstyle import CUDARenderer, OpenCLRenderer
+from tinygrad.helpers import DEBUG, OSX, unwrap, fromimport, Target, is_image_shape, round_up
+from tinygrad.renderer import Renderer, with_storage
+from tinygrad.renderer.cstyle import CUDARenderer
 from tinygrad.uop.ops import GroupOp, Ops, UOp, PatternMatcher, UPat, range_str
 from tinygrad.runtime.autogen import mesa, libc
 from tinygrad.runtime.support.c import POINTER
@@ -92,8 +92,6 @@ nload = nir_instr(nc=lambda u:u.max_numel(), bs=lambda u:u.dtype.bitsize, num_co
 
 ngid = nir_instr(nc=3, bs=32)(lambda b: mesa.nir_intrinsic_instr_create(b.shader, mesa.nir_intrinsic_load_workgroup_id))
 nlid = nir_instr(nc=3, bs=32)(lambda b: mesa.nir_intrinsic_instr_create(b.shader, mesa.nir_intrinsic_load_local_invocation_id))
-ngsz = nir_instr(nc=3, bs=32)(lambda b: mesa.nir_intrinsic_instr_create(b.shader, mesa.nir_intrinsic_load_workgroup_size))
-def nid(b): return nalu(b, "iadd", nalu(b, "imul", ngid(b), ngsz(b)), nlid(b))
 
 nbarrier = nir_instr(has_def=False, intrins={"EXECUTION_SCOPE":mesa.SCOPE_WORKGROUP})(
   lambda b: mesa.nir_intrinsic_instr_create(b.shader, mesa.nir_intrinsic_barrier))
@@ -118,35 +116,36 @@ class NIRRenderer(Renderer):
   suffix = "NIR"
   nir_options: bytes
   global_max, local_max, shared_max = CUDARenderer.global_max, CUDARenderer.local_max, CUDARenderer.shared_max
-  code_for_op = {**{k:lambda:None for k in u_aop.keys()}, **{k:lambda:None for k in s_aop.keys()}, **{k:lambda:None for k in f_aop.keys()}}
+  code_for_op = {**{k:lambda:None for k in s_aop.keys()}, **{k:lambda:None for k in f_aop.keys()}}
 
   extra_matcher = PatternMatcher([
-    # handle negative unsigned CONST
-    (UPat.cvar("x", dtypes.uints), lambda x: UOp.const(x.dtype, x.dtype.max+x.arg+1) if x.arg < 0 else None),
     # from ptx
     (UPat.var('x', dtype=dtypes.bool)<UPat.var('y'), lambda x,y: (x^True)&y),
-    # load/store bool -> uint8
+    # a bool is one bit in NIR but a byte in memory, so every access to a bool buffer goes through a uint8 view of it
     (UPat(Ops.LOAD, dtypes.bool, name="x"),
-     lambda x: x.replace(dtype=dtypes.uint8, src=x.src[0:1]+((x.src[1].cast(dtypes.uint8),) if len(x.src)>=2 else ())+x.src[2:]).cast(dtypes.bool)),
-    (UPat(Ops.STORE, src=(UPat(), UPat(dtype=dtypes.bool)), name="x", allow_any_len=True),
-     lambda x: x.replace(src=(x.src[0], x.src[1].cast(dtypes.uint8))+x.src[2:])),
+     lambda x: x.replace(src=(with_storage(x.src[0], dtypes.uint8),)+((x.src[1].cast(dtypes.uint8),) if len(x.src)>=2 else ())
+      +x.src[2:]).cast(dtypes.bool)),
+    (UPat(Ops.STORE, src=(UPat(name="idx"), UPat(dtype=dtypes.bool)), name="x", allow_any_len=True),
+     lambda x,idx: x.replace(src=(with_storage(idx, dtypes.uint8), x.src[1].cast(dtypes.uint8))+x.src[2:])),
     # NIR requires shift amount to be 32 bit: https://docs.mesa3d.org/nir/alu.html#nir-alu-op-ishl
     (UPat((Ops.SHL, Ops.SHR), name="x"), lambda x: x.replace(src=(x.src[0], x.src[1].cast(dtypes.uint))) if x.src[1].dtype.bitsize != 32 else None),
     # OpConvertFToU is undefined if Result Type is not wide enough, cast through int32
     # ref: https://registry.khronos.org/SPIR-V/specs/unified1/SPIRV.html#OpConvertFToU
     (UPat(Ops.CAST, (dtypes.uchar, dtypes.ushort), src=(UPat.var("x", dtypes.floats),), name="c"), lambda x,c: x.cast(dtypes.int32).cast(c.dtype)),
     # load/store use pointer arithmetic, and the cast does nothing. NOTE: this doesn't apply to image indexing cause it's 1-D
-    (UPat((Ops.INDEX, Ops.SHRINK), src=(UPat.var("buf"), UPat.var("off")), allow_any_len=True, name="x"), lambda x,buf,off: x.replace(
-      src=(buf,off.cast(dtypes.long))+x.src[2:]) if buf.addrspace != AddrSpace.REG and not is_image_shape(buf._shape) else None),
-    # images need index to be int for nir
-    (UPat.var("buf").index(UPat.var("idx_y"), UPat.var("idx_x")),
-     lambda buf,idx_y,idx_x: buf.index(idx_y.cast(dtypes.int), idx_x.cast(dtypes.int))),
+    # nor to REG/ALU register picks, which keep their own index dtype
+    (UPat((Ops.INDEX, Ops.SHRINK), src=(UPat.var("buf"), UPat.var("off")), allow_any_len=True, name="x"),
+     lambda x,buf,off: x.replace(src=(buf,off.ccast(dtypes.long))+x.src[2:])
+      if buf.addrspace in (AddrSpace.GLOBAL, AddrSpace.LOCAL) and not is_image_shape(buf._shape) else None),
+    # images need index to be int for nir (coordinates only: the INDEX keeps its access dtype)
+    (UPat.var("buf").index(UPat.var("idx_y"), UPat.var("idx_x"), name="x"),
+     lambda x,buf,idx_y,idx_x: x.replace(src=(buf, idx_y.cast(dtypes.int), idx_x.cast(dtypes.int)))),
   ])
 
   def_rewrite = PatternMatcher([
-    (UPat(Ops.CONST, name="x"), lambda ctx,x: nimm(ctx.b, x.arg, x.dtype)),
+    (UPat.cvar("c").cast(name="x"), lambda ctx,x,c: nimm(ctx.b, c.val, x.dtype)),
     (UPat(Ops.PARAM, name="x"), lambda ctx,x: ctx.param(ctx.b, x, x.dtype.itemsize if x.addrspace is AddrSpace.ALU else 8)),
-    (UPat(Ops.SPECIAL, name="x"), lambda ctx,x: nchannel(ctx.b, {'g':ngid, 'l':nlid, 'i': nid}[x.arg[0]](ctx.b), int(x.arg[-1]))),
+    (UPat(Ops.SPECIAL, name="x"), lambda ctx,x: nchannel(ctx.b, {'g':ngid, 'l':nlid}[x.arg[0]](ctx.b), int(x.arg[-1]))),
     (UPat(Ops.STORE, src=(UPat((Ops.INDEX, Ops.SHRINK), src=(UPat.var("buf"),UPat.var("off")), allow_any_len=True), UPat.var("val"))),
      lambda ctx,buf,off,val: nstore(ctx.b, buf.addrspace, nidx(ctx.b, ctx.r[buf], ctx.r[off], buf.addrspace, buf.dtype.itemsize), ctx.r[val])),
     (UPat(Ops.LOAD, src=(UPat((Ops.INDEX, Ops.SHRINK), src=(UPat.var("buf"), UPat.var("off")), allow_any_len=True), UPat.var("alt"),
@@ -159,7 +158,7 @@ class NIRRenderer(Renderer):
     (UPat(Ops.STACK, name="x"), lambda ctx,x: nalu(ctx.b, f"vec{x.max_numel()}", *[ctx.r[src] for src in x.src])),
     (UPat(GroupOp.ALU, name="x"), lambda ctx,x: nalu(ctx.b, aop[x.src[0].dtype][x.op], *[ctx.r[src] for src in x.src])),
     (UPat(Ops.CAST, name="x"), lambda ctx,x: ncast(ctx.b, ctx.r[x.src[0]], x.src[0].dtype, x.dtype)),
-    (UPat(Ops.BITCAST, src=(UPat.var("a"),), allow_any_len=True), lambda ctx,a: ctx.r[a]),
+    (UPat(Ops.BITCAST, src=(UPat.var("a"),)), lambda ctx,a: ctx.r[a]),
     (UPat(Ops.BUFFER, name="x"), lambda ctx,x: mesa.nir_local_variable_create(ctx.b.impl,
       mesa.glsl_array_type(glsl_type(x.dtype), x.max_numel(), 0).contents, f"acc{x.arg.slot}".encode()).contents),
     (UPat(Ops.BARRIER), lambda ctx: nbarrier(ctx.b)),
@@ -180,22 +179,23 @@ class NIRRenderer(Renderer):
   def param(self, b:mesa.nir_builder, x, sz:int) -> mesa.nir_def: raise NotImplementedError("needs param")
   def prerender(self, uops:list[UOp]):
     self.b = mesa.nir_builder_init_simple_shader(mesa.MESA_SHADER_COMPUTE, mesa.nir_shader_compiler_options.from_buffer_copy(self.nir_options), None)
-    self.b.shader.contents.info.workgroup_size_variable = any([u.op == Ops.SPECIAL and u.arg[0] == 'i' for u in uops])
   def postrender(self, uops:list[UOp]): pass
 
   def render(self, uops:list[UOp]):
     self.prerender(uops)
-    for u in [u for u in uops if u.op is Ops.SPECIAL and u.arg[0] == "l"]: self.b.shader.contents.info.workgroup_size[int(u.arg[-1])] = u.src[0].arg
+    for u in [u for u in uops if u.op is Ops.SPECIAL and u.arg[0] == "l"]:
+      self.b.shader.contents.info.workgroup_size[int(u.arg[-1])] = u.src[0].src[0].val
     self.r: dict[UOp, Any] = {}
-    self.param_idx, ranges = 0, []
+    self.param_idx = 0
+    ranges: list[mesa.nir_def|None] = []
 
     for u in uops:
-      if u.op in {Ops.NOOP, Ops.GROUP} or (u.op is Ops.STACK and len(u.src) == 0): pass
+      if u.op in {Ops.NOOP, Ops.CONST} or (u.op is Ops.STACK and len(u.src) == 0): pass
       elif u.op in {Ops.INDEX, Ops.SHRINK}:
         # INDEX on a register value picks the element, memory INDEX is handled in the LOAD/STORE patterns
-        if u.src[0].op not in {Ops.PARAM, Ops.BUFFER, Ops.AFTER}: self.r[u] = nchannel(self.b, self.r[u.src[0]], u.src[1].arg)
+        if u.src[0].op not in {Ops.PARAM, Ops.BUFFER, Ops.AFTER}: self.r[u] = nchannel(self.b, self.r[u.src[0]], u.src[1].src[0].val)
       elif u.op is Ops.AFTER:
-        self.r[u] = self.r[u.src[0]]
+        if u.dtype is not dtypes.void: self.r[u] = self.r[u.src[0]]
       elif u.op == Ops.SINK:
         if u.arg is not None:
           self.b.shader.contents.info.name = ctypes.cast(ctypes.create_string_buffer(u.arg.function_name.encode()), POINTER[ctypes.c_char])
@@ -203,11 +203,20 @@ class NIRRenderer(Renderer):
         self.r[u] = nimm(self.b, self.b.shader.contents.info.shared_size, dtypes.long)
         self.b.shader.contents.info.shared_size += u.max_numel()*u.dtype.itemsize
       elif u.op == Ops.RANGE:
-        ranges.append(i:=deref_var(self.b, mesa.nir_local_variable_create(self.b.impl, glsl_type(u.dtype), f"idx{range_str(u)}".encode()).contents))
-        nstore(self.b, AddrSpace.REG, i, nimm(self.b, 0, u.dtype))
-        mesa.nir_push_loop(self.b)
-        self.r[u] = nload(self.b, AddrSpace.REG, i, u)
-        nif(self.b, nalu(self.b, "ilt", self.r[u], self.r[u.src[0]]), lambda: None, lambda: njump(self.b, mesa.nir_jump_break))
+        if u.dtype == dtypes.void:
+          # a RANGE with no bound is a loop header: just open the loop, BACKEDGE supplies its condition
+          ranges.append(None)
+          mesa.nir_push_loop(self.b)
+        else:
+          ranges.append(i:=deref_var(self.b, mesa.nir_local_variable_create(self.b.impl, glsl_type(u.dtype), f"idx{range_str(u)}".encode()).contents))
+          nstore(self.b, AddrSpace.REG, i, nimm(self.b, 0, u.dtype))
+          mesa.nir_push_loop(self.b)
+          self.r[u] = nload(self.b, AddrSpace.REG, i, u)
+          nif(self.b, nalu(self.b, "ilt", self.r[u], self.r[u.src[0]]), lambda: None, lambda: njump(self.b, mesa.nir_jump_break))
+      elif u.op == Ops.BACKEDGE:
+        nif(self.b, self.r[u.src[2]], lambda: None, lambda: njump(self.b, mesa.nir_jump_break))
+        ranges.pop()
+        mesa.nir_pop_loop(self.b, None)
       elif u.op == Ops.END:
         r = u.src[1]
         next_i = nalu(self.b, "iadd", self.r[r], nimm(self.b, 1, r.dtype))
@@ -234,9 +243,11 @@ class NIRRenderer(Renderer):
 
   def supported_dtypes(self): return {d for d in Renderer.supported_dtypes(self) if d not in dtypes.fp8s+(dtypes.bfloat16,)}
 
+def padded_idx(param_idx:int, size:int): return round_up(param_idx, size) + size
+
 class NAKRenderer(NIRRenderer):
-  param = nir_instr(nc=1, num_components=1, bs=lambda sz:sz*8, also=lambda self,sz: setattr(self, "param_idx", self.param_idx + sz),
-    intrins={"ALIGN_MUL":lambda sz:sz}, srcs=lambda self,b: [nsrc(nimm(b, 0, dtypes.int)), nsrc(nimm(b, self.param_idx, dtypes.int))])(
+  param = nir_instr(nc=1, num_components=1, bs=lambda sz:sz*8, also=lambda self,sz: setattr(self, "param_idx", padded_idx(self.param_idx, sz)),
+    intrins={"ALIGN_MUL":lambda sz:sz}, srcs=lambda self,b,sz: [nsrc(nimm(b,0,dtypes.int)), nsrc(nimm(b, round_up(self.param_idx,sz), dtypes.int))])(
        lambda self, b, x, sz: mesa.nir_intrinsic_instr_create(b.shader, mesa.nir_intrinsic_ldc_nv))
 
   def supported_dtypes(self): return {d for d in super().supported_dtypes() if (d != dtypes.half or int(self.target.arch[3:]) >= 53)}
@@ -251,12 +262,13 @@ class LVPRenderer(NIRRenderer):
   code_for_op = {k:v for k,v in NIRRenderer.code_for_op.items() if k != Ops.EXP2}
 
   param = nir_instr(nc=1, bs=lambda sz: sz * 8, num_components=1, intrins={"ALIGN_MUL":lambda sz: sz, "RANGE":lambda self: self.param_sz},
-    srcs=lambda b, self: [nsrc(nimm(b, 0, dtypes.int)), nsrc(nimm(b, self.param_idx, dtypes.int))], also=lambda self, sz:
-    setattr(self, "param_idx", self.param_idx+sz))(lambda self,b,x,sz: mesa.nir_intrinsic_instr_create(b.shader, mesa.nir_intrinsic_load_ubo))
+    srcs=lambda b,self,sz: [nsrc(nimm(b, 0, dtypes.int)), nsrc(nimm(b, round_up(self.param_idx, sz), dtypes.int))], also=lambda self, sz:
+    setattr(self, "param_idx", padded_idx(self.param_idx, sz)))(lambda self,b,x,sz:
+                                                                mesa.nir_intrinsic_instr_create(b.shader, mesa.nir_intrinsic_load_ubo))
 
   def prerender(self, uops:list[UOp]):
     super().prerender(uops)
-    self.param_sz = sum([u.dtype.itemsize if u.addrspace is AddrSpace.ALU else 8 for u in uops if u.op is Ops.PARAM])
+    self.param_sz = functools.reduce(padded_idx, (u.element_size() if u.addrspace is AddrSpace.ALU else 8 for u in uops if u.op is Ops.PARAM), 0)
 
 def tovec(b, idx_y, idx_x): return nalu(b, "vec4", idx_x, idx_y, nundef(b, dtypes.int), nundef(b, dtypes.int))
 def nfloat(dtype): return mesa.nir_type_float16 if dtype == dtypes.half else mesa.nir_type_float32
@@ -270,9 +282,7 @@ _nload_img = nir_instr(intrins=lambda dtype:{'IMAGE_DIM':mesa.GLSL_SAMPLER_DIM_2
   srcs=lambda b,img,idx_y,idx_x:[nsrc(x) for x in [img, tovec(b, idx_y, idx_x), nundef(b, dtypes.int), nimm(b, 0, dtypes.int)]])(
       lambda b,img,idx_y,idx_x,dtype: mesa.nir_intrinsic_instr_create(b.shader, g("nir_intrinsic_image_load")))
 
-class IR3Renderer(NIRRenderer, OpenCLRenderer):
-  has_aux = True
-
+class IR3Renderer(NIRRenderer):
   def nload_img(ctx,img,idx_y,idx_x):
     ctx.texs.add(img)
     return _nload_img(ctx.b, ctx.r[img], ctx.r[idx_y], ctx.r[idx_x], img.dtype)
@@ -296,7 +306,8 @@ class IR3Renderer(NIRRenderer, OpenCLRenderer):
     super().prerender(uops)
     self.texs:set[UOp] = set()
     self.img_idx = 0
-    self.param_sz = sum([u.dtype.itemsize if u.addrspace is AddrSpace.ALU else 8 for u in uops if u.op is Ops.PARAM])
+    self.param_sz = functools.reduce(padded_idx, (u.element_size() if u.addrspace is AddrSpace.ALU else 8
+                                                 for u in uops if u.op is Ops.PARAM and not is_image_shape(u._shape)), 0)
 
   def postrender(self, uops:list[UOp]):
     bufs = [u for u in uops if u.op is Ops.PARAM and u.addrspace is not AddrSpace.ALU]

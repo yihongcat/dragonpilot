@@ -26,8 +26,8 @@ BORDER_COLORS = {
   UIStatus.ALKA: rl.Color(0x22, 0xa0, 0xdc, 0xf1),  # Blue for ALKA state
 }
 
-WIDE_CAM_MAX_SPEED = 10.0  # m/s (22 mph)
-ROAD_CAM_MIN_SPEED = 15.0  # m/s (34 mph)
+WIDE_CAM_MAX_SPEED = 5.0  # m/s (11 mph)
+ROAD_CAM_MIN_SPEED = 10.0  # m/s (22 mph)
 INF_POINT = np.array([1000.0, 0.0, 0.0])
 
 # dp
@@ -116,11 +116,11 @@ class AugmentedRoadView(CameraView):
     self._draw_border(rect)
 
   def _handle_mouse_press(self, _):
-    if not self._hud_renderer.user_interacting() and self._click_callback is not None:
+    if self._click_callback is not None:
       self._click_callback()
 
   def _handle_mouse_release(self, _):
-    # We only call click callback on press if not interacting with HUD
+    # We only call click callback on press
     pass
 
   def _draw_border(self, rect: rl.Rectangle):
@@ -143,7 +143,7 @@ class AugmentedRoadView(CameraView):
       rl.draw_rectangle(int(rect.x + rect.width-UI_BORDER_SIZE), indicator_y, UI_BORDER_SIZE, indicator_height, self._dp_indicator_color_right)
 
   def _switch_stream_if_needed(self, sm):
-    if sm['selfdriveState'].experimentalMode and WIDE_CAM in self.available_streams:
+    if sm['carParams'].openpilotLongitudinalControl and WIDE_CAM in self.available_streams:
       v_ego = sm['carState'].vEgo
       if v_ego < WIDE_CAM_MAX_SPEED:
         target = WIDE_CAM

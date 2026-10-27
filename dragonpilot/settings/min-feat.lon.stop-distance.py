@@ -17,6 +17,7 @@ ITEMS = [
     "step": 1,
     "suffix": lambda: tr("m"),
     "condition": "openpilotLongitudinalControl",
+    "depends_on": "dp_lon_extensions_enabled == 1",
     "flags": "PERSISTENT",
     "param_type": "INT",
   },

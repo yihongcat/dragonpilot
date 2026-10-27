@@ -29,11 +29,6 @@ ITEMS = [
     "condition": _DASHY,
   },
   {
-    "section": _SEC, "key": "ExperimentalMode", "type": "toggle_item",
-    "title": lambda: tr("Experimental Mode"),
-    "condition": _DASHY,
-  },
-  {
     "section": _SEC, "key": "DisengageOnAccelerator", "type": "toggle_item",
     "title": lambda: tr("Disengage on Accelerator Pedal"),
     "description": lambda: tr(_TOGGLES_DESC["DisengageOnAccelerator"]),

@@ -3,7 +3,7 @@ set -e
 set -x
 
 DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" >/dev/null && pwd)"
-cd $DIR
+cd "$DIR"
 
 BUILD_DIR=/data/openpilot
 SOURCE_DIR="$(git rev-parse --show-toplevel)"
@@ -22,22 +22,23 @@ source "$DIR/identity.sh"
 
 echo "[-] Setting up repo T=$SECONDS"
 if ! git -C "$SOURCE_DIR" worktree remove --force "$BUILD_DIR" 2>/dev/null; then
-  rm -rf $BUILD_DIR
+  rm -rf "$BUILD_DIR"
 fi
 git -C "$SOURCE_DIR" worktree prune
 git -C "$SOURCE_DIR" worktree add --detach --no-checkout "$BUILD_DIR"
-cd $BUILD_DIR
+cd "$BUILD_DIR"
 git update-ref -d "refs/heads/$BUILD_BRANCH"
 git symbolic-ref HEAD "refs/heads/$BUILD_BRANCH"
 git read-tree --empty
 
 # do the files copy
 echo "[-] copying files T=$SECONDS"
-cd $SOURCE_DIR
+cd "$SOURCE_DIR"
 ./tools/release/release_files.py | xargs -0 cp -pR --parents -t "$BUILD_DIR" --
 
 # in the directory
-cd $BUILD_DIR
+cd "$BUILD_DIR"
+source "$SOURCE_DIR/tools/release/setup_lfs.sh"
 
 # use the full CPU available for speeding up the build.
 # openpilot resets the CPU frequencies when test_onroad.py runs below.
@@ -48,9 +49,6 @@ for policy in /sys/devices/system/cpu/cpufreq/policy*; do
 done
 
 scons
-if [ -n "$INCLUDE_BIG_MODEL" ]; then
-  test -f openpilot/selfdrive/modeld/models/big_driving_tinygrad.pkl.chunkmanifest
-fi
 
 scons -j$(nproc) panda/
 
@@ -58,6 +56,12 @@ scons -j$(nproc) panda/
 rm -f panda_tici/board/obj/panda.bin.signed
 rm -f panda_tici/board/obj/panda_h7.bin.signed
 scons -j$(nproc) panda_tici/
+
+if [ -n "$INCLUDE_BIG_MODEL" ]; then
+  test -f openpilot/selfdrive/modeld/models/big_driving_tinygrad.pkl
+  test -f openpilot/selfdrive/modeld/models/big_driving_warp_1344x760_tinygrad.pkl
+  test -f openpilot/selfdrive/modeld/models/big_driving_warp_1928x1208_tinygrad.pkl
+fi
 
 # Ensure no submodules in release
 if test "$(git submodule--helper list | wc -l)" -gt "0"; then
@@ -74,7 +78,7 @@ find . -name '*.os' -delete
 find . -name '*.pyc' -delete
 find . -name 'moc_*' -delete
 find . -name '__pycache__' -delete
-rm -rf .sconsign.dblite Jenkinsfile tools/release/
+rm -rf .sconsign.dblite tools/release/
 rm -f openpilot/selfdrive/modeld/models/*.onnx*
 
 # Mark as prebuilt release

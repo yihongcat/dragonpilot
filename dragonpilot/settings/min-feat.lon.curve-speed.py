@@ -9,7 +9,7 @@ ITEMS = [
     "title": lambda: tr("Curve Speed Reduction"),
     "description": lambda: tr(
       "Uses the model's predicted path, curve distance, and the vehicle's lateral acceleration limit to slow before turns. " +
-      "Higher values keep more margin below the vehicle limit. Only affects End-to-End longitudinal; Off leaves model behavior unchanged."
+      "Higher values keep more margin below the vehicle limit. Requires DP Longitudinal Extensions; Off leaves Autospeed behavior unchanged."
     ),
     "default": "0",
     "min_val": 0,
@@ -18,6 +18,7 @@ ITEMS = [
     "suffix": "%",
     "special_value_text": lambda: tr("Off"),
     "condition": "openpilotLongitudinalControl",
+    "depends_on": "dp_lon_extensions_enabled == 1",
     "flags": "PERSISTENT",
     "param_type": "INT",
   },

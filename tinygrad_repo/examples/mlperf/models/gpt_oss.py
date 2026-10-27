@@ -10,13 +10,18 @@ if __name__ == "__main__":
 from tinygrad import Tensor, nn, function, getenv, dtypes, TinyJit
 from tinygrad.helpers import Timing, colored, GlobalCounters, profile_marker
 from tinygrad.uop.ops import Ops, UOp
-from extra.models.llama import apply_rotary_emb, precompute_freqs_cis
+from extra.models.llama import apply_rotary_emb
 from extra.llama_kernels.rmsnorm import rmsnorm
-from extra.gemm.cdna_asm_gemm import _mx_block_scale, _mx_block_scale_3d, quantize_mxfp8
+from extra.gemm.cdna_asm_gemm import _mx_block_scale, _mx_block_scale_3d, quantize_mxfp8, asm_gemm, can_use_asm_gemm, mx_pack
+from extra.gemm.moe_gemm import grouped_mx_gemm
+from extra.gemm.moe_routing import route, dispatch, dispatch_fp8, combine, router_mfma, Routing, BLOCK_ROW
+from extra.gptoss_kernels.embedding import GPTOSSEmbedding
 
 FP8_DTYPE = dtypes.fp8e4m3
 FP8_MAX = 448.0
-INIT_STD = 0.008
+INIT_STD = 0.02
+ASM_GEMM = getenv("ASM_GEMM", 0)
+PRESTORE_WT = getenv("PRESTORE_WT", 0)
 
 def _quant_dequant_fwd(x:Tensor) -> Tensor:
   # x (2d bf16) -> bf16 value after an mxfp8 round-trip (1x32 block scaling on the last axis)
@@ -37,7 +42,7 @@ def _quant_dequant_bwd(grad:UOp, call:UOp) -> tuple:
 
 def quant_dequant_mx(x:Tensor) -> Tensor:
   fxn = _quant_dequant_fwd_fxn(x.as_param(0).uop, x.device)
-  return Tensor(UOp.maketuple(fxn.uop).call(x.uop, grad_fxn=_quant_dequant_bwd).gettuple(0))
+  return Tensor(fxn.uop.call_with_output(x.uop, grad_fxn=_quant_dequant_bwd))
 
 def _mx_scale(e8:Tensor) -> Tensor:
   return _mx_block_scale(e8) if e8.ndim == 2 else _mx_block_scale_3d(e8)
@@ -50,25 +55,82 @@ def _dequant_fwd_fxn(wq_p, ws_p, device):
   return _dequant_fwd(Tensor(wq_p, device=device), Tensor(ws_p, device=device))
 
 def _dequant_bwd(grad:UOp, call:UOp) -> tuple:
-  w_scale = Tensor(call.src[2])
-  return ((Tensor(grad).cast(dtypes.bfloat16) * _mx_scale(w_scale).cast(dtypes.bfloat16)).uop, None)
+  return (Tensor(grad).cast(dtypes.bfloat16).uop, None)
 
 def dequant_weight(w_q:Tensor, w_scale:Tensor) -> Tensor:
   fxn = _dequant_fwd_fxn(w_q.as_param(0).uop, w_scale.as_param(1).uop, w_q.device)
-  call = UOp.maketuple(fxn.uop).call(w_q.uop, w_scale.uop, grad_fxn=_dequant_bwd)
-  return Tensor(call.gettuple(0))
+  return Tensor(fxn.uop.call_with_output(w_q.uop, w_scale.uop, grad_fxn=_dequant_bwd))
 
-def matmul_mx(x:Tensor, w_q:Tensor, w_scale:Tensor) -> Tensor:
+def matmul_mx(x:Tensor|tuple[Tensor, Tensor], w_q:Tensor, w_scale:Tensor, *, padded_output:bool=False) -> Tensor:
+  if isinstance(x, tuple):
+    assert ASM_GEMM, "pre-quantized MXFP8 input requires ASM_GEMM"
+    from extra.gemm.cdna_asm_gemm import asm_gemm, can_use_asm_gemm, mx_pack
+    x_q, x_e8 = x
+    l_shape, padded = x_q.shape[:-1], x_q.shape[-1]
+    x_q, x_e8 = x_q.reshape(-1, padded), x_e8.reshape(-1, padded // 32)
+    K, N = w_q.shape[1], w_q.shape[0]
+    assert padded >= K and (padded - K) % 32 == 0 and x_e8.shape[-1] == padded // 32
+    wq, ws = w_q, w_scale
+    if (pad := padded - K):
+      wq = wq.pad(((0, 0), (0, pad)))
+      ws = ws.pad(((0, 0), (0, pad // 32)), value=127).cast(dtypes.uint8)
+    if (npad := (-N) % 256):
+      wq = wq.pad(((0, npad), (0, 0)))
+      ws = ws.pad(((0, npad), (0, 0)), value=127).cast(dtypes.uint8)
+    assert can_use_asm_gemm(x_q, wq.T)
+    out = asm_gemm(x_q, wq.T, mx=True, mx_scales=(mx_pack(x_e8), x_e8, mx_pack(ws), ws), mx_w_stored=True)
+    if padded_output: return out
+    return (out[:, :N] if npad else out).reshape(*l_shape, N).cast(dtypes.bfloat16)
   l_shape = x.shape[:-1]
+  if ASM_GEMM:
+    from extra.gemm.cdna_asm_gemm import asm_gemm, can_use_asm_gemm, mx_pack
+    x2, K, N = x.reshape(-1, x.shape[-1]), x.shape[-1], w_q.shape[0]
+    wq, ws = w_q, w_scale
+    if (pad := (-K) % 256):
+      x2 = x2.pad(((0, 0), (0, pad)))
+      wq = wq.pad(((0, 0), (0, pad)))
+      ws = ws.pad(((0, 0), (0, pad // 32)), value=127).cast(dtypes.uint8)
+    if (npad := (-N) % 256):
+      wq = wq.pad(((0, npad), (0, 0)))
+      ws = ws.pad(((0, npad), (0, 0)), value=127).cast(dtypes.uint8)
+    local_rows = x2.shape[0] // len(x2.device) if isinstance(x2.device, tuple) and x2.uop.axis == 0 else x2.shape[0]
+    if getenv("FUSED_ATTN_QE8", 0) and (local_rows, x2.shape[1]) == (16384, 4096) and w_q.shape == (2880, 4096):
+      from extra.gptoss_kernels.quantize_mxfp8 import quantize_mxfp8_fused_qe8
+      x_q, x_e8 = quantize_mxfp8_fused_qe8(x2)
+      x_si = mx_pack(x_e8)
+    else: x_q, x_e8, x_si = quantize_mxfp8(x2)
+    if x_si is not None and can_use_asm_gemm(x_q, wq.T):
+      out = asm_gemm(x_q, wq.T, mx=True, mx_scales=(x_si, x_e8, mx_pack(ws), ws), mx_w_stored=True)
+      if padded_output: return out
+      return (out[:, :N] if npad else out).reshape(*l_shape, N).cast(dtypes.bfloat16)
+  assert not padded_output, "padded output requires an ASM GEMM"
   x_phys = quant_dequant_mx(x.reshape(-1, x.shape[-1])).reshape(*l_shape, x.shape[-1])
   w_phys = dequant_weight(w_q, w_scale)
   return (x_phys @ w_phys.T).cast(dtypes.bfloat16)
+
+def _pad_to_mult(t:Tensor, axis:int, mult:int=256) -> Tensor:
+  if (r := (-t.shape[axis]) % mult) == 0: return t
+  pads = [(0, 0)] * t.ndim
+  pads[axis] = (0, r)
+  return t.pad(tuple(pads))
+
+def _pad_cols(t:Tensor) -> Tensor: return _pad_to_mult(t, -1)
+def _pad_rows(t:Tensor) -> Tensor: return _pad_to_mult(t, -2)
 
 def swiglu(x:Tensor, limit:float=7.0, alpha:float=1.702) -> Tensor:
   x_glu, x_linear = x[..., ::2], x[..., 1::2]
   x_glu = x_glu.clamp(max_=limit)
   x_linear = x_linear.clamp(-limit, limit)
   return (x_glu * (alpha * x_glu).sigmoid()) * (x_linear + 1)
+
+def _moe_bias_tile(bias:Tensor, r:Routing) -> Tensor:
+  tile_bias = r.tile_e.one_hot(bias.shape[0]).float() @ bias.float()
+  return tile_bias.reshape(-1, 1, bias.shape[1]).expand(-1, BLOCK_ROW, -1).reshape(-1, bias.shape[1])
+
+def precompute_freqs_cis(dim: int, end: int, theta: float = 10000.0) -> Tensor:
+  freqs = 1.0 / (theta ** (Tensor.arange(0, dim, 2, dtype=dtypes.float32)[:(dim // 2)] / dim))
+  freqs = Tensor.arange(end, dtype=dtypes.float32).unsqueeze(dim=1) * freqs.unsqueeze(dim=0)
+  return Tensor.stack(freqs.cos(), freqs.sin(), dim=-1).cast(dtypes.default_float).reshape(1, end, 1, dim//2, 2)
 
 class GPTOSS:
   def __init__(self, dim:int, n_layers:int, n_heads:int, n_kv_heads:int, head_dim:int, n_experts:int, experts_per_tok:int,
@@ -95,76 +157,197 @@ class GPTOSS:
     self.ffn_norm = Tensor.ones(n_layers, dim).contiguous()
     self.gate = Tensor.normal(n_layers, n_experts, dim, mean=0.0, std=INIT_STD, dtype=dtypes.bfloat16)
     self.gate_bias = Tensor.zeros(n_layers, n_experts, dtype=dtypes.bfloat16).contiguous()
-    self.w_gate_up, self.w_gate_up_scale = self._quant_weight(n_layers, n_experts, intermediate_size * 2, dim)
+    self.w_gate_up, self.w_gate_up_scale = self._quant_weight(n_layers, n_experts, intermediate_size * 2, dim, moe=True)
     self.w_gate_up_bias = Tensor.zeros(n_layers, n_experts, intermediate_size * 2, dtype=dtypes.bfloat16).contiguous()
-    self.w_down, self.w_down_scale = self._quant_weight(n_layers, n_experts, dim, intermediate_size, std=scaled_std)
+    self.w_down, self.w_down_scale = self._quant_weight(n_layers, n_experts, dim, intermediate_size, std=scaled_std, moe=True)
     self.w_down_bias = Tensor.zeros(n_layers, n_experts, dim, dtype=dtypes.bfloat16).contiguous()
+    if PRESTORE_WT:
+      self.w_gate_up_wT, self.w_gate_up_wT_scale = self._make_wT(self.w_gate_up, self.w_gate_up_scale)
+      self.w_down_wT, self.w_down_wT_scale = self._make_wT(self.w_down, self.w_down_scale)
 
     # output
     self.norm = nn.RMSNorm(dim, norm_eps)
-    self.tok_embeddings = nn.Embedding(vocab_size, dim)
+    if getenv("GPTOSS_EMBEDDING", 0):
+      self.tok_embeddings = GPTOSSEmbedding(vocab_size, dim)
+    else:
+      self.tok_embeddings = nn.Embedding(vocab_size, dim)
     self.tok_embeddings.weight = Tensor.normal(vocab_size, dim, mean=0.0, std=INIT_STD, dtype=dtypes.bfloat16)
     self.output = Tensor.normal(vocab_size, dim, mean=0.0, std=INIT_STD, dtype=dtypes.bfloat16)
     self.freqs_cis = precompute_freqs_cis(head_dim, max_context * 2, rope_theta).contiguous().is_param_(False)
 
-  def _quant_weight(self, *shape:int, std:float=INIT_STD):
-    w = Tensor.zeros(*shape) if getenv("ZEROS") else Tensor.normal(*shape, mean=0.0, std=std)
-    w_q, w_e8, _ = quantize_mxfp8(w)
-    return w_q, w_e8.is_param_(False)
+  def _quant_weight(self, *shape:int, std:float=INIT_STD, moe:bool=False):
+    def _one(*s:int):
+      w = Tensor.zeros(*s) if getenv("ZEROS") else Tensor.normal(*s, mean=0.0, std=std)
+      w_q, w_e8, _ = quantize_mxfp8(_pad_cols(_pad_rows(w)) if moe else w)
+      return w_q, w_e8.is_param_(False)
+    if moe:
+      qs = [_one(*shape[1:]) for _ in range(shape[0])]
+      for q in qs: q[0]._zero2 = True  # grad arrives sharded on the expert axis under ZeRO-2 (moe_gemm)
+      return [q[0] for q in qs], [q[1] for q in qs]
+    return _one(*shape)
 
-  def _attn_mask(self, seqlen:int, sliding:bool, dtype) -> Tensor:
+  def _make_wT(self, weights:list[Tensor], scales:list[Tensor]):
+    wtq, wte = [], []
+    for w_q, w_e8 in zip(weights, scales):
+      wq, we, _ = quantize_mxfp8((w_q.cast(dtypes.bfloat16) * _mx_block_scale_3d(w_e8).cast(dtypes.bfloat16)).transpose(1, 2))
+      wq, we = wq.is_param_(False), we.is_param_(False)
+      wq._prestore_wT = we._prestore_wT = True
+      wtq.append(wq); wte.append(we)
+    return wtq, wte
+
+  def _attn_mask(self, seqlen:int, dtype) -> Tensor:
     i, j = Tensor.arange(seqlen).reshape(seqlen, 1), Tensor.arange(seqlen).reshape(1, seqlen)
-    allowed = j <= i
-    if sliding: allowed = allowed & (i - j < self.sliding_window)
-    return allowed.where(0.0, -1e30).cast(dtype).contiguous()
+    return (j <= i).where(0.0, -1e30).cast(dtype).contiguous()
 
-  def attention(self, x:Tensor, freqs_cis:Tensor, mask:Tensor, *, attention_norm:Tensor, wqkv:Tensor, wqkv_scale:Tensor,
-                wqkv_bias:Tensor, wo:Tensor, wo_scale:Tensor, wo_bias:Tensor, sinks:Tensor):
+  def _sliding_attention(self, xq:Tensor, xk:Tensor, xv:Tensor, sinks:Tensor) -> Tensor:
+    bsz, seqlen, H, hd = xq.shape
+    KV, R, W = self.n_kv_heads, self.n_rep, self.sliding_window
+    assert seqlen % W == 0, f"seqlen {seqlen} must be a multiple of sliding_window {W} for banded attention"
+    nb = seqlen // W
+    q = xq.reshape(bsz, seqlen, KV, R, hd).permute(0, 2, 3, 1, 4).reshape(bsz, KV, R, nb, W, hd).float()
+    k, v = (x.permute(0, 2, 1, 3).reshape(bsz, KV, 1, nb, W, hd).float() for x in (xk, xv))
+    kk, vv = (x.pad((None, None, None, (1, 0), None, None))[:, :, :, :nb].cat(x, dim=-2) for x in (k, v))
+    sc = (q @ kk.transpose(-1, -2)) * self.sm_scale   # (B,KV,R,nb,W,2W)
+    i, j, pv = Tensor.arange(W).reshape(W, 1), Tensor.arange(2 * W).reshape(1, 2 * W), Tensor.arange(nb).reshape(nb, 1, 1) >= 1
+    sc = ((j > i) & (j <= i + W) & (pv | (j >= W))).where(sc, -float("inf"))
+    sink = sinks.reshape(1, KV, R, 1, 1, 1).float()
+    m = sc.max(-1, keepdim=True).maximum(sink)
+    e = (sc - m).exp()
+    p = (e / (e.sum(-1, keepdim=True) + (sink - m).exp())).cast(dtypes.bfloat16)
+    attn = p @ vv.cast(dtypes.bfloat16)
+    return attn.reshape(bsz, KV, R, seqlen, hd).permute(0, 3, 1, 2, 4).reshape(bsz, seqlen, H * hd)
+
+  def attention(self, x:Tensor, freqs_cis:Tensor, mask:Tensor, sliding:bool, *, attention_norm:Tensor, wqkv:Tensor,
+                wqkv_scale:Tensor, wqkv_bias:Tensor, wo:Tensor, wo_scale:Tensor, wo_bias:Tensor, sinks:Tensor):
     bsz, seqlen, _ = x.shape
-    x_normed, rrms = rmsnorm(x, self.norm_eps)
-    qkv = matmul_mx(x_normed * attention_norm, wqkv, wqkv_scale) + wqkv_bias
-    qkv = qkv.reshape(bsz, seqlen, self.n_kv_heads, self.n_rep + 2, self.head_dim)
-    xq = qkv[:, :, :, :self.n_rep].reshape(bsz, seqlen, self.n_heads, self.head_dim)
-    xk, xv = qkv[:, :, :, self.n_rep], qkv[:, :, :, self.n_rep + 1]
-    xq, xk = apply_rotary_emb(xq, xk, freqs_cis)
 
-    xq = xq.cast(dtypes.bfloat16).reshape(bsz, seqlen, self.n_kv_heads, self.n_rep, self.head_dim).permute(0, 2, 3, 1, 4)
-    xk = xk.cast(dtypes.bfloat16).permute(0, 2, 1, 3).unsqueeze(2)
-    xv = xv.cast(dtypes.bfloat16).permute(0, 2, 1, 3).unsqueeze(2)
-    scores = (xq @ xk.transpose(-2, -1)).float() * self.sm_scale + mask
-    sink = sinks.reshape(1, self.n_kv_heads, self.n_rep, 1, 1).float()
-    m = scores.max(-1, keepdim=True).maximum(sink)
-    e = (scores - m).exp()
-    w = (e / (e.sum(-1, keepdim=True) + (sink - m).exp())).cast(dtypes.bfloat16)
-    attn = (w @ xv).permute(0, 3, 1, 2, 4).reshape(bsz, seqlen, self.n_heads * self.head_dim)
+    if getenv("FUSED_RMSNORM_MX", 0):
+      from extra.gptoss_kernels.rmsnorm import rmsnorm_mul_quantize_mxfp8
+      x_q, x_e8, rrms = rmsnorm_mul_quantize_mxfp8(x, attention_norm, self.norm_eps)
+      qkv = matmul_mx((x_q, x_e8), wqkv, wqkv_scale) + wqkv_bias
+      norm_saves = [x_q, x_e8, rrms]
+    elif getenv("FUSED_RMSNORM_MUL", 0):
+      from extra.gptoss_kernels.rmsnorm import rmsnorm_mul
+      x_normed, rrms = rmsnorm_mul(x, attention_norm, self.norm_eps)
+      qkv = matmul_mx(x_normed, wqkv, wqkv_scale) + wqkv_bias
+      norm_saves = [x_normed, rrms]
+    else:
+      x_normed, rrms = rmsnorm(x, self.norm_eps)
+      qkv = matmul_mx(x_normed * attention_norm, wqkv, wqkv_scale) + wqkv_bias
+      norm_saves = [x_normed, rrms]
 
-    out = matmul_mx(attn, wo, wo_scale) + wo_bias
-    return out, [x_normed, rrms, attn]
+    if getenv("FUSED_QKV_ROPE", 0):
+      from extra.gptoss_kernels.qkv_rope import fused_qkv_rope
+      xq, xk, xv = fused_qkv_rope(qkv, freqs_cis)
+    else:
+      qkv = qkv.reshape(bsz, seqlen, self.n_kv_heads, self.n_rep + 2, self.head_dim)
+      xq = qkv[:, :, :, :self.n_rep].reshape(bsz, seqlen, self.n_heads, self.head_dim)
+      xk, xv = qkv[:, :, :, self.n_rep], qkv[:, :, :, self.n_rep + 1]
+      xq, xk = apply_rotary_emb(xq, xk, freqs_cis)
+      xq, xk, xv = xq.cast(dtypes.bfloat16), xk.cast(dtypes.bfloat16), xv.cast(dtypes.bfloat16)  # (B,N,H,D)/(B,N,KV,D)
+
+    fa_saves = []
+    if getenv("HK_FLASH_ATTENTION"):
+      from extra.thunder.amd.fa import flash_attention
+      attn, _, l_vec = flash_attention(xq, xk, xv, is_causal=True, write_flat=True, sinks=sinks, window=self.sliding_window if sliding else 0)
+      attn = attn.reshape(bsz, seqlen, self.n_heads * self.head_dim)
+      fa_saves = [xq, xk, xv, l_vec]
+    elif sliding:
+      attn = self._sliding_attention(xq, xk, xv, sinks)
+    else:
+      xqm = xq.reshape(bsz, seqlen, self.n_kv_heads, self.n_rep, self.head_dim).permute(0, 2, 3, 1, 4)
+      xkm, xvm = xk.permute(0, 2, 1, 3).unsqueeze(2), xv.permute(0, 2, 1, 3).unsqueeze(2)
+      scores = (xqm @ xkm.transpose(-2, -1)).float() * self.sm_scale + mask
+      sink = sinks.reshape(1, self.n_kv_heads, self.n_rep, 1, 1).float()
+      m = scores.max(-1, keepdim=True).maximum(sink)
+      e = (scores - m).exp()
+      w = (e / (e.sum(-1, keepdim=True) + (sink - m).exp())).cast(dtypes.bfloat16)
+      attn = (w @ xvm).permute(0, 3, 1, 2, 4).reshape(bsz, seqlen, self.n_heads * self.head_dim)
+
+    proj = matmul_mx(attn, wo, wo_scale, padded_output=bool(getenv("GPTOSS_RESIDUAL_HIP", 0)))
+    if getenv("GPTOSS_RESIDUAL_HIP", 0):
+      from extra.gptoss_kernels.residual import wo_bias_add
+      out = wo_bias_add(proj[:, :self.dim].reshape(x.shape), wo_bias)
+    else:
+      out = proj + wo_bias
+    return out, [attn] + norm_saves + fa_saves, proj
 
   def feed_forward(self, x:Tensor, *, ffn_norm:Tensor, gate:Tensor, gate_bias:Tensor,
                    w_gate_up:Tensor, w_gate_up_scale:Tensor, w_gate_up_bias:Tensor,
                    w_down:Tensor, w_down_scale:Tensor, w_down_bias:Tensor):
-    x_normed, rrms = rmsnorm(x, self.norm_eps)
-    inp = x_normed * ffn_norm
+    if getenv("FUSED_RMSNORM_MUL", 0):
+      from extra.gptoss_kernels.rmsnorm import rmsnorm_mul
+      x_normed, rrms = rmsnorm_mul(x, ffn_norm, self.norm_eps)
+      inp = x_normed
+    else:
+      x_normed, rrms = rmsnorm(x, self.norm_eps)
+      inp = x_normed * ffn_norm
 
-    logits = inp.float() @ gate.float().T + gate_bias.float()
-    thresh = logits.topk(self.experts_per_tok)[0][..., -1:]
-    weights = (logits >= thresh).where(logits, -float("inf")).softmax(-1)
+    dim, inter = self.dim, self.intermediate_size
 
-    out = None
-    for e in range(self.n_experts):
-      gate_up = matmul_mx(inp, w_gate_up[e], w_gate_up_scale[e]) + w_gate_up_bias[e]
-      y = (matmul_mx(swiglu(gate_up, self.swiglu_limit), w_down[e], w_down_scale[e]) + w_down_bias[e]).contiguous()
-      contrib = weights[..., e:e+1].cast(y.dtype) * y
-      out = contrib if out is None else out + contrib
+    if getenv("GROUPED_MOE", 0):
+      bsz, seqlen = x.shape[:2]
+      quantized = None
+      if getenv("FUSED_ROUTER_DGRAD", 0): assert getenv("FUSED_ROUTER_TOPK", 0) and getenv("FP8_DISPATCH", 0)
+      if getenv("FUSED_ROUTER_TOPK", 0):
+        from extra.gptoss_kernels.router_topk import fused_router, fused_router_quantize
+        from extra.gemm.moe_routing import route_topk
+        if getenv("FUSED_ROUTER_DGRAD", 0):
+          weights, topi, q, scales = fused_router_quantize(inp, gate, gate_bias)
+          quantized = (q, scales)
+        else:
+          weights, topi = fused_router(inp, gate, gate_bias)
+        r = route_topk(weights, topi, self.n_experts)
+      else:
+        logits = router_mfma(inp, gate, gate_bias) if getenv("ROUTER_MFMA", 0) else inp.float() @ gate.float().T + gate_bias.float()
+        r = route(logits.reshape(-1, self.n_experts), self.experts_per_tok, self.n_experts)
+      inp = inp.reshape(-1, dim)
+      xg = dispatch_fp8(quantized, r) if quantized is not None else \
+        (dispatch_fp8 if getenv("FP8_DISPATCH", 0) else dispatch)(_pad_cols(inp.cast(dtypes.bfloat16)), r)
+      h = grouped_mx_gemm(xg, (w_gate_up, w_gate_up_scale), r.off)[:, :2*inter] + _moe_bias_tile(w_gate_up_bias, r).cast(dtypes.bfloat16)
+      if getenv("FUSED_SWIGLU", 0):
+        from extra.gptoss_kernels.swiglu import fused_swiglu_quantize
+        y = fused_swiglu_quantize(h)
+      else:
+        y = swiglu(h, self.swiglu_limit)
+      if getenv("FUSED_COMBINE", 0):
+        from extra.gptoss_kernels.combine import down_combine
+        yq, ye8 = y if isinstance(y, tuple) else quantize_mxfp8(_pad_cols(y.cast(dtypes.bfloat16)))[:2]
+        out, z = down_combine(yq, ye8, w_down, w_down_scale, r.off, w_down_bias, r.dest_row, r.weights)
+        out = out.reshape(bsz, seqlen, dim)
+      else:
+        z = grouped_mx_gemm(y if isinstance(y, tuple) else _pad_cols(y.cast(dtypes.bfloat16)), (w_down, w_down_scale), r.off)[:, :dim] \
+            + _moe_bias_tile(w_down_bias, r).cast(dtypes.bfloat16)
+        out = combine(z, r, inp.shape[0], self.experts_per_tok).reshape(bsz, seqlen, dim)
+      return out, [x_normed, rrms, *(xg if isinstance(xg, tuple) else (xg,)), h, *(y if isinstance(y, tuple) else (y,)), z,
+                   r.weights, r.topi, r.dest_row, r.off,
+                   *([quantized[1]] if quantized is not None else [])]
+    else:
+      logits = router_mfma(inp, gate, gate_bias) if getenv("ROUTER_MFMA", 0) else inp.float() @ gate.float().T + gate_bias.float()
+      thresh = logits.topk(self.experts_per_tok)[0][..., -1:]
+      weights = (logits >= thresh).where(logits, -float("inf")).softmax(-1)
+
+      out = None
+      for e in range(self.n_experts):
+        gu_q, gu_s = w_gate_up[e][:2*inter, :dim].contiguous(), w_gate_up_scale[e][:2*inter, :dim//32].contiguous()
+        dn_q, dn_s = w_down[e][:dim, :inter].contiguous(), w_down_scale[e][:dim, :inter//32].contiguous()
+        gate_up = matmul_mx(inp, gu_q, gu_s) + w_gate_up_bias[e]
+        y = (matmul_mx(swiglu(gate_up, self.swiglu_limit), dn_q, dn_s) + w_down_bias[e]).contiguous()
+        contrib = weights[..., e:e+1].cast(y.dtype) * y
+        out = contrib if out is None else out + contrib
     return out, [x_normed, rrms]
 
   @function(precompile=True, precompile_backward=True)
-  def run_layer(self, x:Tensor, freqs_cis:Tensor, mask:Tensor, attn_kwargs:dict, ffn_kwargs:dict, save:bool=True):
-    attn, attn_saves = self.attention(x, freqs_cis, mask, **attn_kwargs)
+  def run_layer(self, x:Tensor, freqs_cis:Tensor, mask:Tensor, sliding:bool, attn_kwargs:dict, ffn_kwargs:dict, save:bool=True):
+    attn, attn_saves, proj = self.attention(x, freqs_cis, mask, sliding, **attn_kwargs)
     h = x + attn
     ffn, ffn_saves = self.feed_forward(h, **ffn_kwargs)
-    h = h + ffn
+    if save: ffn_saves.append(h)
+    if getenv("GPTOSS_RESIDUAL_HIP", 0):
+      from extra.gptoss_kernels.residual import residual_join
+      h = residual_join(h, x, proj, attn_kwargs["wo_bias"], ffn)
+    else:
+      h = h + ffn
     if save: return (h, *attn_saves, *ffn_saves)
     return (h,)
 
@@ -178,8 +361,7 @@ class GPTOSS:
     h = self.tok_embeddings(tokens)
     bsz, seqlen = tokens.shape
     freqs_cis = self.freqs_cis.cast(h.dtype)[:, :seqlen, :, :, :]
-    mask_full = self._attn_mask(seqlen, False, dtypes.float32)
-    mask_sliding = self._attn_mask(seqlen, True, dtypes.float32)
+    mask_full = None if getenv("HK_FLASH_ATTENTION") else self._attn_mask(seqlen, dtypes.float32)
     for i in range(self.n_layers):
       attn_kwargs = dict(attention_norm=self.attention_norm[i], wqkv=self.wqkv[i], wqkv_scale=self.wqkv_scale[i],
                          wqkv_bias=self.wqkv_bias[i], wo=self.wo[i], wo_scale=self.wo_scale[i], wo_bias=self.wo_bias[i],
@@ -187,10 +369,31 @@ class GPTOSS:
       ffn_kwargs = dict(ffn_norm=self.ffn_norm[i], gate=self.gate[i], gate_bias=self.gate_bias[i],
                         w_gate_up=self.w_gate_up[i], w_gate_up_scale=self.w_gate_up_scale[i], w_gate_up_bias=self.w_gate_up_bias[i],
                         w_down=self.w_down[i], w_down_scale=self.w_down_scale[i], w_down_bias=self.w_down_bias[i])
-      mask = mask_sliding if i % 2 == 0 else mask_full
-      h, *_ = self.run_layer(h, freqs_cis, mask, attn_kwargs, ffn_kwargs, save=save)
+      h, *_ = self.run_layer(h, freqs_cis, mask_full, i % 2 == 0, attn_kwargs, ffn_kwargs, save=save)
 
-    logits = self.norm(h) @ self.output.T
+    if getenv("FAST_FINAL_RMSNORM", 0):
+      from extra.gptoss_kernels.rmsnorm import fast_final_rmsnorm
+      h_normed = fast_final_rmsnorm(h, self.norm.weight, self.norm_eps)
+    else: h_normed = self.norm(h)
+
+    if getenv("FP8_LMHEAD", 0) and ASM_GEMM:
+      pad = (-self.dim) % 256
+      h2 = h_normed.reshape(-1, self.dim).pad(((0, 0), (0, pad)))
+      w2 = self.output.pad(((0, 0), (0, pad)))
+      hq, he8, hsi = quantize_mxfp8(h2)
+      oq, oe8, _ = quantize_mxfp8(w2)
+      if hsi is not None and can_use_asm_gemm(hq, oq.T):
+        logits = asm_gemm(hq, oq.T, mx=True, mx_scales=(hsi, he8, mx_pack(oe8), oe8), mx_w_stored=False)
+        logits = logits.reshape(bsz, seqlen, self.vocab_size).cast(dtypes.bfloat16)
+      else:
+        logits = h_normed @ self.output.T
+    elif ASM_GEMM:
+      pad = (-self.dim) % 256
+      h_padded, w_padded = h_normed.pad((None, None, (0, pad))), self.output.pad(((0, 0), (0, pad)))
+      logits = asm_gemm(h_padded, w_padded.T) if can_use_asm_gemm(h_padded, w_padded.T) and getenv("VOCAB_ASM", 1) else h_normed @ self.output.T
+    else:
+      logits = h_normed @ self.output.T
+
     return logits
 
 def _get_pads(uop:UOp) -> list[UOp]:
@@ -201,14 +404,14 @@ def apply_grad(grad_buf:Tensor, new_grad:UOp):
   pads = _get_pads(new_grad)
   if len(pads) <= 1:
     new_grad = new_grad.cast(grad_buf.dtype)
-    grad_buf.uop = grad_buf.uop.after(grad_buf.uop.store(grad_buf.uop + new_grad))
+    grad_buf.uop = grad_buf.uop.after(grad_buf.uop.store(new_grad))
     return
   cur = grad_buf.uop
   for pad in sorted(pads, key=lambda p: p.marg[0][0] if p.op == Ops.PAD else 0, reverse=True):
     if pad.op == Ops.PAD:
-      grad_shrink = tuple([(p[0], s+p[0]) for s,p in zip(pad.src[0].shape, pad.marg)])
+      grad_shrink = tuple((p[0], s+p[0]) for s,p in zip(pad.src[0].shape, pad.marg))
       buf_slice = cur.shrink(grad_shrink)
-      cur = cur.after(buf_slice.store(buf_slice + pad.src[0].cast(cur.dtype)))
+      cur = cur.after(buf_slice.store(pad.src[0].cast(cur.dtype)))
     else:
       cur = cur.after(cur.store(cur + pad.cast(cur.dtype)))
   grad_buf.uop = cur

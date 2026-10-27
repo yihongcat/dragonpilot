@@ -1,6 +1,6 @@
 import functools
 from tinygrad import Tensor, dtypes
-from tinygrad.uop.ops import UOp, Ops, KernelInfo, AxisType
+from tinygrad.uop.ops import UOp, Ops, KernelInfo
 
 @functools.cache
 def _custom_fused_ce_loss_fwd(loss_out:UOp, max_out:UOp, lse_out:UOp, logits:UOp, targets:UOp,
@@ -9,13 +9,13 @@ def _custom_fused_ce_loss_fwd(loss_out:UOp, max_out:UOp, lse_out:UOp, logits:UOp
   b = row // seq
   s = row % seq
 
-  v_max = UOp.range(vocab, 1, axis_type=AxisType.REDUCE)
+  v_max = UOp.range(vocab, 1)
   row_max = logits[b, s, v_max].cast(dtypes.float).reduce(v_max, arg=Ops.MAX)
 
-  v_lse = UOp.range(vocab, 2, axis_type=AxisType.REDUCE)
+  v_lse = UOp.range(vocab, 2)
   row_lse = (logits[b, s, v_lse].cast(dtypes.float) - row_max).exp().reduce(v_lse, arg=Ops.ADD).log() + row_max
 
-  v_smooth = UOp.range(vocab, 3, axis_type=AxisType.REDUCE)
+  v_smooth = UOp.range(vocab, 3)
   target = logits[b, s, targets[row].cast(dtypes.weakint)].cast(dtypes.float)
   mean_logits = logits[b, s, v_smooth].cast(dtypes.float).reduce(v_smooth, arg=Ops.ADD) / vocab
   loss = row_lse - (1.0 - label_smoothing) * target - label_smoothing * mean_logits
@@ -48,7 +48,7 @@ def _fused_ce_loss_bwd(gradient:UOp, kernel:UOp, label_smoothing:float):
     axis = logits_u.axis
     ndev = len(device)
     local_shape = tuple(s//ndev if i == axis else s for i,s in enumerate((MBS, SEQ, VOCAB)))
-    d_logits = Tensor(Tensor.invalids(*local_shape, dtype=dtypes.bfloat16, device=device).uop.multi(axis), device=device)
+    d_logits = Tensor(Tensor.invalids(*local_shape, dtype=dtypes.bfloat16, device=device).uop.unshard(axis), device=device)
     rows_per_dev = local_shape[0] * local_shape[1]
     seq_per_dev = local_shape[1]
   else:
@@ -74,11 +74,11 @@ def fused_ce_loss(logits:Tensor, targets:Tensor, label_smoothing:float=0.1) -> T
     axis = logits.uop.axis
     assert axis in (0, 1), f"unsupported sharding axis={axis} for CE loss"
     ndev = len(logits.device)
-    loss_out = Tensor(Tensor.invalids(rows // ndev, dtype=dtypes.float32, device=logits.device).uop.multi(0),
+    loss_out = Tensor(Tensor.invalids(rows // ndev, dtype=dtypes.float32, device=logits.device).uop.unshard(0),
                       device=logits.device)
-    max_out  = Tensor(Tensor.invalids(rows // ndev, dtype=dtypes.float32, device=logits.device).uop.multi(0),
+    max_out  = Tensor(Tensor.invalids(rows // ndev, dtype=dtypes.float32, device=logits.device).uop.unshard(0),
                       device=logits.device)
-    lse_out  = Tensor(Tensor.invalids(rows // ndev, dtype=dtypes.float32, device=logits.device).uop.multi(0),
+    lse_out  = Tensor(Tensor.invalids(rows // ndev, dtype=dtypes.float32, device=logits.device).uop.unshard(0),
                       device=logits.device)
     local_shape = tuple(s//ndev if i == axis else s for i,s in enumerate(logits.shape))
     rows_per_dev = local_shape[0] * local_shape[1]

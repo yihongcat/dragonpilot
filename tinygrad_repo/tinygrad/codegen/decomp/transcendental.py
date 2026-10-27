@@ -16,8 +16,8 @@ def exponent_bias(d:DType) -> int: return (1 << (dtypes.finfo(d)[0] - 1)) - (0 i
 def exponent_mask(d:DType) -> int: return (1 << dtypes.finfo(d)[0]) - 1
 
 # **** utils ****
-def shr(x:UOp|int, y:UOp|int) -> UOp: return x // (2**(y.simplify().arg) if isinstance(y, UOp) else 2**y)
-def shl(x:UOp|int, y:UOp|int) -> UOp: return x * (2**(y.simplify().arg) if isinstance(y, UOp) else 2**y)
+def shr(x:UOp|int, y:UOp|int) -> UOp: return x // (2**(y.simplify().val) if isinstance(y, UOp) else 2**y)
+def shl(x:UOp|int, y:UOp|int) -> UOp: return x * (2**(y.simplify().val) if isinstance(y, UOp) else 2**y)
 
 def rintk(d:UOp) -> UOp:
   """round d:float to int away from 0"""
@@ -90,10 +90,10 @@ def payne_hanek_reduction(d:UOp) -> tuple[UOp, UOp]:
     if count+offset < len(two_over_pi_f) - 1:
       an = i.ne(count).where(_take(an, offset, count=count+1), an.const_like(two_over_pi_f[count+offset]))
     return an
-  def _shl_lazy(x:UOp, y:UOp): return (x.cast(dtypes.uint64) * pow2if(y, d.dtype).cast(dtypes.uint64)).cast(dtypes.uint32)
-  def _shr_lazy(x:UOp, y:UOp): return (x.cast(dtypes.uint64) // pow2if(y, d.dtype).cast(dtypes.uint64)).cast(dtypes.uint32)
+  def _shl_lazy(x:UOp, y:UOp): return (x.cast(dtypes.uint64) << y.cast(dtypes.uint64)).cast(dtypes.uint32)
+  def _shr_lazy(x:UOp, y:UOp): return (x.cast(dtypes.uint64) >> y.cast(dtypes.uint64)).cast(dtypes.uint32)
 
-  a = [_take(UOp.const(dtypes.uint32, 0), i) for i in range(4)]
+  a = [_take(UOp.const(0, dtypes.uint32), i) for i in range(4)]
   #  (two_over_pi_f[Int(i) + n] << e) | (two_over_pi_f[Int(i) + n+1] >> (nbits - e))
   # Note: e >= 1 for all numbers d >= 1.0. assume e != 0
   hi = _shl_lazy(a[0], e) | _shr_lazy(a[1], offset)
@@ -200,7 +200,7 @@ def xexp2(d:UOp) -> UOp:
   x = _lazy_map_numbers(d, d.const_like(0.0), d.const_like(0.0), d.const_like(0.0), d)
   q = rintk(x)
   # s = d - round(d)
-  s = x - q.cast(x.dtype)
+  s = x - q
   # a polynomial approximation with 13 non-zero terms in the range of [−(log 2)/2,(log 2)/2].
   if d.dtype == dtypes.float64:
     u = polyN(s, [0.4434359082926529454e-9, 0.7073164598085707425e-8, 0.1017819260921760451e-6, 0.1321543872511327615e-5, 0.1525273353517584730e-4,
@@ -226,7 +226,7 @@ def xlog2(d:UOp) -> UOp:
   denormal_exp = 10 if d.dtype == dtypes.float16 else 64
   FLT_MIN = d.const_like({dtypes.float16: 6.1e-5, dtypes.float32: 1e-4, dtypes.float64: 1e-4}[d.dtype])
   is_denormal = d<FLT_MIN
-  a = is_denormal.where(d * (2 ** denormal_exp), d)
+  a = is_denormal.where(d * (2.0 ** denormal_exp), d)
 
   e = ilogb2k(a * (1.0 / 0.75)).cast(a.dtype)
   m = ldexp3k(a, -e)
@@ -249,20 +249,37 @@ def xlog2(d:UOp) -> UOp:
   r = d.ne(0.0).where(r, r.const_like(-math.inf))
   # log2(x) = NaN for x < 0
   r = (d<-0.0).where(r.const_like(math.nan), r)
-  # log2(NaN) = NaN
-  r = d.ne(d).where(r.const_like(math.nan), r)
   # log2(-0.0) = -Inf. In certain devices like PTX, x == -0.0 won't be true. so making reciprocal.
-  return d.reciprocal().ne(-math.inf).where(r, r.const_like(-math.inf))
+  r = d.reciprocal().ne(-math.inf).where(r, r.const_like(-math.inf))
+  # Check NaN last: comparisons of its reciprocal are not reliable on every backend.
+  return d.ne(d).where(r.const_like(math.nan), r)
 
 def xpow(base:UOp, exponent:UOp) -> UOp:
   # start with b ** e = exp2(e * log2(b))
   ret = (base < 0).where(-base, base).log2().mul(exponent).exp2()
-  # negative base: nan for non-integer exponent, negate for odd integer exponent
+  # negative base: nan for non-integer exponent, negate for odd integer exponent. -inf is never nan, it stays |base| ** exponent
   non_int = exponent != exponent.cast(dtypes.int32).cast(exponent.dtype)
   is_odd = (exponent < 0).where(-exponent, exponent).cast(dtypes.int32).mod(2).cast(dtypes.bool)
-  neg_base = non_int.where(ret.const_like(math.nan), is_odd.where(-ret, ret))
-  # fix 0 ** 0 = 1
-  return (base.eq(0) & exponent.eq(0)).where(ret.const_like(1), (base < 0).where(neg_base, ret))
+  neg_base = non_int.where(base.ne(-math.inf).where(ret.const_like(math.nan), ret), is_odd.where(-ret, ret))
+  # x ** 0 = 1, including 0 ** 0 and inf ** 0
+  return exponent.eq(0).where(ret.const_like(1), (base < 0).where(neg_base, ret))
+
+def xpow_int(base:UOp, exponent:UOp, dt:DType) -> UOp|None:
+  if dt not in dtypes.ints: return None
+  # square and multiply over the exponent bits in unsigned, masking so products wrap instead of growing
+  udt = dt if dtypes.is_unsigned(dt) else dtypes.uints[dtypes.sints.index(dt)]
+  ret, sq = (b:=base.cast(dt).bitcast(udt)).const_like(1), b
+  edt = exponent.dtype
+  lo, hi = (edt.min, edt.max) if edt in dtypes.ints and exponent.overflows(edt) else (exponent.vmin, exponent.vmax)
+  for i in range(nbits:=int(max(hi, 0)).bit_length()):
+    ret = ((exponent >> i) & 1).ne(0).where((ret*sq) & udt.max, ret)
+    if i < nbits-1: sq = (sq*sq) & udt.max
+  ret = ret.bitcast(dt)
+  if lo >= 0: return ret
+  # negative exponent truncates to 0, except for 1 and -1
+  one = ret.const_like(1)
+  neg = (sb:=b.bitcast(dt)).eq(-1).where((exponent & 1).ne(0).where(-one, one), sb.eq(1).where(one, 0))
+  return (exponent < 0).where(neg, ret)
 
 @functools.cache
 def get_transcendental_patterns(ops:tuple[Ops, ...], force_transcendental:bool) -> PatternMatcher:

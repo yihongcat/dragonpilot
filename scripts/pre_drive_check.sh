@@ -69,6 +69,8 @@ run_unit_tests() {
     openpilot/system/loggerd/tests/test_deleter.py \
     openpilot/selfdrive/controls/tests/test_curve_speed_limiter.py \
     openpilot/selfdrive/controls/tests/test_curve_planner_integration.py \
+    openpilot/selfdrive/controls/tests/test_autospeed_compatibility.py \
+    openpilot/selfdrive/controls/tests/test_accel_boost.py \
     dragonpilot/selfdrive/controls/lib/test_acm.py \
     dragonpilot/selfdrive/controls/lib/test_aem.py
 }

@@ -1,8 +1,36 @@
-# The merged DP tree materializes assets that are submodules in upstream OP.
-# Track only the four files that are actually stored as LFS pointers here.
+* text=auto eol=lf
+
+# DP vendors dependencies and retains materialized assets. Only actual LFS pointers use LFS.
 docs/assets/favicon.svg filter=lfs diff=lfs merge=lfs -text
+openpilot/common/hardware/comma/updater filter=lfs diff=lfs merge=lfs -text
 openpilot/selfdrive/assets/icons/fire.png filter=lfs diff=lfs merge=lfs -text
 openpilot/selfdrive/assets/icons/yellow_warning.png filter=lfs diff=lfs merge=lfs -text
+openpilot/selfdrive/assets/icons_mici/chestnut_green.png filter=lfs diff=lfs merge=lfs -text
+openpilot/selfdrive/assets/icons_mici/chestnut_orange.png filter=lfs diff=lfs merge=lfs -text
+openpilot/selfdrive/assets/icons_mici/longitudinal/car.png filter=lfs diff=lfs merge=lfs -text
+openpilot/selfdrive/assets/icons_mici/longitudinal/car_green.png filter=lfs diff=lfs merge=lfs -text
+openpilot/selfdrive/assets/icons_mici/longitudinal/distance_1.png filter=lfs diff=lfs merge=lfs -text
+openpilot/selfdrive/assets/icons_mici/longitudinal/distance_1_green.png filter=lfs diff=lfs merge=lfs -text
+openpilot/selfdrive/assets/icons_mici/longitudinal/distance_2.png filter=lfs diff=lfs merge=lfs -text
+openpilot/selfdrive/assets/icons_mici/longitudinal/distance_2_green.png filter=lfs diff=lfs merge=lfs -text
+openpilot/selfdrive/assets/icons_mici/longitudinal/distance_3.png filter=lfs diff=lfs merge=lfs -text
+openpilot/selfdrive/assets/icons_mici/longitudinal/distance_3_green.png filter=lfs diff=lfs merge=lfs -text
+openpilot/selfdrive/assets/icons_mici/onroad/bookmark.png filter=lfs diff=lfs merge=lfs -text
+openpilot/selfdrive/assets/icons_mici/onroad/bookmark_fill.png filter=lfs diff=lfs merge=lfs -text
+openpilot/selfdrive/assets/icons_mici/settings/device/apple.png filter=lfs diff=lfs merge=lfs -text
+openpilot/selfdrive/assets/icons_mici/settings/device/commacare.png filter=lfs diff=lfs merge=lfs -text
+openpilot/selfdrive/assets/icons_mici/settings/device/github.png filter=lfs diff=lfs merge=lfs -text
+openpilot/selfdrive/assets/icons_mici/settings/device/google.png filter=lfs diff=lfs merge=lfs -text
+openpilot/selfdrive/assets/icons_mici/settings/device/green_cell.png filter=lfs diff=lfs merge=lfs -text
+openpilot/selfdrive/assets/icons_mici/settings/device/green_settings.png filter=lfs diff=lfs merge=lfs -text
+openpilot/selfdrive/assets/icons_mici/settings/device/paired_apple.png filter=lfs diff=lfs merge=lfs -text
+openpilot/selfdrive/assets/icons_mici/settings/device/paired_github.png filter=lfs diff=lfs merge=lfs -text
+openpilot/selfdrive/assets/icons_mici/settings/device/paired_google.png filter=lfs diff=lfs merge=lfs -text
+openpilot/selfdrive/assets/icons_mici/settings/device/phone.png filter=lfs diff=lfs merge=lfs -text
 openpilot/selfdrive/assets/icons_mici/settings/software.png filter=lfs diff=lfs merge=lfs -text
+openpilot/selfdrive/assets/icons_mici/usb.png filter=lfs diff=lfs merge=lfs -text
+openpilot/selfdrive/assets/sounds/critical_max.wav filter=lfs diff=lfs merge=lfs -text
+openpilot/selfdrive/assets/sounds/dm_critical_max.wav filter=lfs diff=lfs merge=lfs -text
+openpilot/selfdrive/assets/sounds/warning.wav filter=lfs diff=lfs merge=lfs -text
 openpilot/selfdrive/modeld/models/dmonitoring_model.onnx filter=lfs diff=lfs merge=lfs -text
 openpilot/selfdrive/modeld/models/driving_supercombo.onnx filter=lfs diff=lfs merge=lfs -text

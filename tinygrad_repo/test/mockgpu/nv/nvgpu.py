@@ -57,14 +57,14 @@ class GPFIFO:
     self.buf_sz = sz // 4
 
   def execute(self) -> bool:
-    initial_off = self.buf_ptr
+    initial_get, initial_off = self.ctrl.GPGet, self.buf_ptr
     while self.ctrl.GPGet != self.ctrl.GPPut:
       self._set_buf_state(self.gpfifo[self.ctrl.GPGet])
 
       if not self.execute_buf():
         # Buffer isn't executed fully, check if any progress and report.
         # Do not move GPGet in this case, will continue from the same state next time.
-        return self.buf_ptr != initial_off
+        return self.ctrl.GPGet != initial_get or self.buf_ptr != initial_off
 
       self.ctrl.GPGet = (self.ctrl.GPGet + 1) % self.entries_cnt
       self._reset_buf_state()
@@ -91,7 +91,7 @@ class GPFIFO:
     args_cnt, vals_cnt = const0[80], const0[81]
     args_addr = qmd.constant_buffer_addr_lower_0 + (qmd.constant_buffer_addr_upper_0 << 32) + 0x160
     args = to_mv(args_addr, args_cnt*8).cast('Q')
-    vals = to_mv(args_addr + args_cnt*8, vals_cnt*4).cast('I')
+    vals = to_mv(args_addr + args_cnt*8, vals_cnt*8).cast('Q')
     cargs = [ctypes.cast(args[i], ctypes.c_void_p) for i in range(args_cnt)] + [ctypes.cast(vals[i], ctypes.c_void_p) for i in range(vals_cnt)]
     gx, gy, gz = qmd.cta_raster_width, qmd.cta_raster_height, qmd.cta_raster_depth
     lx, ly, lz = qmd.cta_thread_dimension0, qmd.cta_thread_dimension1, qmd.cta_thread_dimension2
@@ -100,11 +100,11 @@ class GPFIFO:
     if qmd.release0_enable:
       rel0 = to_mv(qmd.release0_address_lower + (qmd.release0_address_upper << 32), 0x10).cast('Q')
       rel0[0] = qmd.release0_payload_lower + (qmd.release0_payload_upper << 32)
-      rel0[1] = int(time.perf_counter() * 1e9)
+      if qmd.release0_structure_size == 0: rel0[1] = int(time.perf_counter() * 1e9) # four words: the timestamp after the payload
     if qmd.release1_enable:
       rel1 = to_mv(qmd.release1_address_lower + (qmd.release1_address_upper << 32), 0x10).cast('Q')
       rel1[0] = qmd.release1_payload_lower + (qmd.release1_payload_upper << 32)
-      rel1[1] = int(time.perf_counter() * 1e9)
+      if qmd.release1_structure_size == 0: rel1[1] = int(time.perf_counter() * 1e9)
     if qmd.dependent_qmd0_enable:
       if qmd.dependent_qmd0_action == 1: self.execute_qmd(qmd.dependent_qmd0_pointer << 8)
       else: raise RuntimeError("unsupported dependent qmd action")
@@ -121,7 +121,7 @@ class GPFIFO:
     return SchedResult.CONT
 
   def _exec_signal(self) -> SchedResult:
-    signal = self._state64_le(nv_gpu.NVC56F_SEM_ADDR_LO)
+    signal = self._state64_le(nv_gpu.NVC56F_SEM_ADDR_LO) & ((1 << 40) - 1) # SEM_ADDR_HI is 8 bits
     val = self._state64_le(nv_gpu.NVC56F_SEM_PAYLOAD_LO)
     flags = self._next_dword()
     typ = (flags >> 0) & 0b111
@@ -192,11 +192,10 @@ class GPFIFO:
       sz = self._state(nv_gpu.NVC6B5_LINE_LENGTH_IN)
       assert flags == 0x182, f"unsupported flags in _exec_nvc6b5_dma: {flags}"
       ctypes.memmove(dst, src, sz)
-    elif ((flags >> 3) & 0b11) != 0:
-      src = to_mv(self._state64(nv_gpu.NVC6B5_SET_SEMAPHORE_A), 0x10).cast('Q')
-      val = self._state(nv_gpu.NVC6B5_SET_SEMAPHORE_PAYLOAD)
-      src[0] = val
-      src[1] = int(time.perf_counter() * 1e9)
+    elif (semaphore_type:=((flags >> 3) & 0b11)) != 0:
+      to_mv(addr:=self._state64(nv_gpu.NVC6B5_SET_SEMAPHORE_A), 4).cast('I')[0] = self._state(nv_gpu.NVC6B5_SET_SEMAPHORE_PAYLOAD)
+      if semaphore_type == nv_gpu.NVC6B5_LAUNCH_DMA_SEMAPHORE_TYPE_RELEASE_FOUR_WORD_SEMAPHORE:
+        to_mv(addr + 8, 8).cast('Q')[0] = int(time.perf_counter() * 1e9)
     else: raise RuntimeError("unknown nvc6b5_dma flags")
 
   def _exec_pcas2(self):
