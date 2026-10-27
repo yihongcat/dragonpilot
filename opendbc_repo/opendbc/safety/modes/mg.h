@@ -98,6 +98,10 @@ static void mg_rx_hook(const CANPacket_t *msg) {
     int cruise_state = (msg->data[5] & 0x38U) >> 3;
     bool cruise_engaged = (cruise_state == 2) ||  // Active
                           (cruise_state == 3);    // Override
+    acc_main_on = cruise_state != 0;
+    if (alka_allowed && ((alternative_experience & ALT_EXP_ALKA) != 0)) {
+      lkas_on = acc_main_on;
+    }
     pcm_cruise_check(cruise_engaged);
   }
 }
@@ -121,6 +125,7 @@ static bool mg_tx_hook(const CANPacket_t *msg) {
 
 static safety_config mg_init(uint16_t param) {
   SAFETY_UNUSED(param);
+  alka_allowed = true;
 
   static const CanMsg MG_TX_MSGS[] = {{0x1fd, 0, 8, .check_relay = true}};
 

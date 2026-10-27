@@ -351,6 +351,14 @@ class TestHondaNidecStockLongSafety(HondaPcmEnableBase, TestHondaNidecSafetyBase
   def test_disable_control_allowed_from_cruise(self):
     pass
 
+  def test_block_aeb(self):
+    # Stock longitudinal never permits openpilot brake messages, even with zero brake.
+    for enabled in (False, True):
+      self.safety.set_controls_allowed(enabled)
+      for aeb in ({}, {"AEB_REQ_1": 1}, {"AEB_REQ_2": 1}, {"AEB_STATUS": 1}):
+        msg = self.packer.make_can_msg_safety("BRAKE_COMMAND", 0, {"COMPUTER_BRAKE": 0, **aeb})
+        self.assertFalse(self._tx(msg))
+
   # No-op longitudinal tests (stock handles it)
   def test_brake_safety_check(self):
     pass

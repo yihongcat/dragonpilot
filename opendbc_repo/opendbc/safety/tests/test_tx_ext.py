@@ -132,7 +132,7 @@ class TestTxExtRelayCheck(TestTxExtBase):
   def _wait_for_relay_timeout(self):
     """Wait for relay transition timeout (1 second = 100 ticks at 100Hz)."""
     for _ in range(200):
-      self.safety.safety_tick_current_safety_config()
+      self.safety.safety_tick()
 
   def test_lock_ctrl_no_relay_malfunction(self):
     """lock_ctrl 0x750 should not trigger relay malfunction when received."""

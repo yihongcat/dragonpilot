@@ -273,7 +273,7 @@ class TestALKAHyundai(TestALKABase):
   """Test ALKA functionality for Hyundai (Main only tracking)."""
 
   def setUp(self):
-    self.packer = CANPackerSafety("hyundai_kia_generic")
+    self.packer = CANPackerSafety("hyundai_kia_generic_generated")
     self.safety = libsafety_py.libsafety
     self.safety.set_safety_hooks(CarParams.SafetyModel.hyundai, 0)
     self.safety.init_tests()
@@ -319,7 +319,7 @@ class TestALKAHyundaiCameraSCC(TestALKABase):
   HYUNDAI_PARAM_CAMERA_SCC = 8
 
   def setUp(self):
-    self.packer = CANPackerSafety("hyundai_kia_generic")
+    self.packer = CANPackerSafety("hyundai_kia_generic_generated")
     self.safety = libsafety_py.libsafety
     self.safety.set_safety_hooks(CarParams.SafetyModel.hyundai, self.HYUNDAI_PARAM_CAMERA_SCC)
     self.safety.init_tests()
@@ -463,7 +463,7 @@ class TestALKAHyundaiLegacy(TestALKABase):
   """Test ALKA functionality for Hyundai Legacy (Main only tracking)."""
 
   def setUp(self):
-    self.packer = CANPackerSafety("hyundai_kia_generic")
+    self.packer = CANPackerSafety("hyundai_kia_generic_generated")
     self.safety = libsafety_py.libsafety
     self.safety.set_safety_hooks(CarParams.SafetyModel.hyundaiLegacy, 0)
     self.safety.init_tests()
@@ -946,7 +946,7 @@ class TestALKAMG(TestALKABase):
     self._set_prev_torque(0)
     for _ in range(6):
       self._rx(self._torque_driver_msg(0))
-    self.assertTrue(self._tx(self._torque_cmd_msg(10, steer_req=1)))
+    self.assertTrue(self._tx(self._torque_cmd_msg(6, steer_req=1)))
 
 
 if __name__ == "__main__":

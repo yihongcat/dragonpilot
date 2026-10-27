@@ -38,6 +38,14 @@ class TestHondaNidecPcmStockLongSafety(TestHondaNidecPcmSafety):
     self.safety.set_safety_hooks(CarParams.SafetyModel.hondaNidec, HondaSafetyFlags.NIDEC_STOCK_LONG)
     self.safety.init_tests()
 
+  def test_block_aeb(self):
+    # Stock longitudinal never permits openpilot brake messages, even with zero brake.
+    for enabled in (False, True):
+      self.safety.set_controls_allowed(enabled)
+      for aeb in ({}, {"AEB_REQ_1": 1}, {"AEB_REQ_2": 1}, {"AEB_STATUS": 1}):
+        msg = self.packer.make_can_msg_safety("BRAKE_COMMAND", 0, {"COMPUTER_BRAKE": 0, **aeb})
+        self.assertFalse(self._tx(msg))
+
   def test_brake_safety_check(self):
     # Stock ACC owns longitudinal — every brake TX must be rejected.
     for brake in np.arange(0, self.MAX_BRAKE + 10, 1):
