@@ -13,7 +13,7 @@ from openpilot.selfdrive.controls.lib.longcontrol import LongCtrlState
 @pytest.fixture
 def setup_planner(monkeypatch):
   mpc = Mock()
-  mpc.v_solution = np.full(len(planner.T_IDXS_MPC), 20.0)
+  mpc.v_solution = 20.0 + 0.5 * planner.T_IDXS_MPC
   mpc.a_solution = np.full(len(planner.T_IDXS_MPC), 0.5)
   mpc.j_solution = np.zeros(len(planner.T_IDXS_MPC) - 1)
   mpc.crash_cnt = 0
@@ -49,6 +49,7 @@ def test_saved_dp_settings_do_not_override_autospeed(setup_planner, stock_long):
 
 def test_model_stop_request_survives_another_candidate_winning(setup_planner):
   CP, sm, mpc = setup_planner
+  mpc.v_solution = 20.0 - 2.0 * planner.T_IDXS_MPC
   mpc.a_solution[:] = -2.0
   sm['modelV2'].action.shouldStop = True
   subject = planner.LongitudinalPlanner(CP, init_v=20.0)
