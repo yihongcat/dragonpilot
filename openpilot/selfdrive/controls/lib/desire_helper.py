@@ -11,13 +11,13 @@ LANE_CHANGE_TIME_MAX = 10.
 LANE_CHANGE_START_TIME = 0.5
 
 class DesireHelper:
-  def __init__(self, dp_lat_lca_speed=LANE_CHANGE_SPEED_MIN, dp_lat_lca_auto_sec=0.):
+  def __init__(self, dp_lat_lca_speed=None, dp_lat_lca_auto_sec=0.):
     self.lane_change_state = LaneChangeState.off
     self.lane_change_direction = LaneChangeDirection.none
     self.lane_change_timer = 0.0
     self.prev_one_blinker = False
     self.desire = log.Desire.none
-    self.dp_lat_lca_speed = float(dp_lat_lca_speed * CV.MPH_TO_MS)
+    self.dp_lat_lca_speed = LANE_CHANGE_SPEED_MIN if dp_lat_lca_speed is None else float(dp_lat_lca_speed * CV.MPH_TO_MS)
     self.dp_lat_lca_auto_sec = dp_lat_lca_auto_sec
     self.dp_lat_lca_auto_sec_start = 0.
 
@@ -25,7 +25,7 @@ class DesireHelper:
   def get_lane_change_direction(CS):
     return LaneChangeDirection.left if CS.leftBlinker else LaneChangeDirection.right
 
-  def update(self, carstate, lateral_active, lane_change_prob, left_edge_detected, right_edge_detected):
+  def update(self, carstate, lateral_active, lane_change_prob, left_edge_detected=False, right_edge_detected=False):
     v_ego = carstate.vEgo
     one_blinker = carstate.leftBlinker != carstate.rightBlinker
     below_lane_change_speed = True if self.dp_lat_lca_speed == 0. else v_ego < self.dp_lat_lca_speed

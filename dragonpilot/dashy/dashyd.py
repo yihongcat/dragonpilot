@@ -296,9 +296,7 @@ def extract_live_tracks(sm):
                 # Skip if this track is already shown as a lead vehicle
                 if pt.trackId in lead_track_ids:
                     continue
-                # Drop stale tracks — radar's predicting, not measuring
-                if not pt.measured:
-                    continue
+                # Current RadarPoint no longer publishes a measured flag.
                 # Drop stationary clutter (sign posts, guardrails,
                 # parked cars). |vRel| < 0.5 m/s ≈ standing still
                 # relative to ego; not relevant traffic.
@@ -309,7 +307,6 @@ def extract_live_tracks(sm):
                     'd': float(pt.dRel),
                     'y': float(pt.yRel),
                     'v': float(pt.vRel),
-                    'm': bool(pt.measured),
                 })
         return {'points': points}
     except Exception as e:

@@ -65,11 +65,13 @@ run_unit_tests() {
     openpilot/system/ui/lib/tests/test_application.py \
     dragonpilot/dashy/tests/test_serverd_startup.py \
     dragonpilot/dashy/tests/test_recordings_api.py \
+    dragonpilot/dashy/tests/test_live_tracks.py \
     openpilot/system/loggerd/tests/test_recordings.py \
     openpilot/system/loggerd/tests/test_deleter.py \
     openpilot/selfdrive/controls/tests/test_curve_speed_limiter.py \
     openpilot/selfdrive/controls/tests/test_curve_planner_integration.py \
     openpilot/selfdrive/controls/tests/test_autospeed_compatibility.py \
+    openpilot/selfdrive/controls/tests/test_desire_helper.py \
     openpilot/selfdrive/controls/tests/test_accel_boost.py \
     dragonpilot/selfdrive/controls/lib/test_acm.py \
     dragonpilot/selfdrive/controls/lib/test_aem.py
