@@ -283,6 +283,15 @@ class CurveSpeedLimiter:
     if len(distances) < 2 or distances[-1] < 0.1:
       return False, 0.0
 
+    # Cropping the horizon can discard the second half of an S-shaped lane
+    # change and make its first arc look like a sustained road turn. Reject
+    # opposing arcs using the complete prediction before measuring the near turn.
+    full_steps = np.diff(distances)
+    full_heading = float(np.sum(0.5 * (signed_curvatures[:-1] + signed_curvatures[1:]) * full_steps))
+    full_absolute_heading = float(np.sum(0.5 * (np.abs(signed_curvatures[:-1]) + np.abs(signed_curvatures[1:])) * full_steps))
+    if abs(full_heading) / max(full_absolute_heading, 1e-6) < LANE_CHANGE_ROAD_TURN_MIN_COHERENCE:
+      return False, abs(full_heading)
+
     end = int(np.searchsorted(distances, min(LANE_CHANGE_ROAD_TURN_MAX_DISTANCE, distances[-1]), side="right"))
     distances = distances[:end]
     signed_curvatures = signed_curvatures[:end]

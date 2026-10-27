@@ -23,10 +23,16 @@ def test_gas_override_boost_is_bounded_and_resets_when_disengaged():
   assert boost.total_boost == 0.0
 
 
-@pytest.mark.parametrize('model_accel,mpc_accel,speed', [(0.0, -1.0, 20.0), (0.0, 1.0, 0.0), (5.1, 6.0, 20.0)])
+@pytest.mark.parametrize('model_accel,mpc_accel,speed', [(0.0, -1.0, 20.0), (0.0, 1.0, 0.0)])
 def test_override_does_not_boost_when_not_model_limited_or_outside_speed_range(model_accel, mpc_accel, speed):
   boost = AccelBoost()
   boost.update(state(speed=speed), model_accel, mpc_accel, 6.0)
   for _ in range(100):
     boost.update(state(gas=True, speed=speed), model_accel, mpc_accel, 6.0)
   assert boost.total_boost == 0.0
+
+
+def test_boost_is_not_applied_above_model_acceleration_range():
+  boost = AccelBoost()
+  boost.total_boost = ACCEL_BOOST_MAX
+  assert boost.update(state(), 5.1, 6.0, 6.0) == 5.1

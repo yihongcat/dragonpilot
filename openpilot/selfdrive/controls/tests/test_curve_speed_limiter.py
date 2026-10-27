@@ -61,17 +61,6 @@ def model_with_s_lane_change(curvature: float = 0.02, speed: float = 25.0):
   return model
 
 
-def model_with_s_lane_change(curvature: float = 0.02, speed: float = 25.0):
-  model = model_with_curve(0.0, speed=speed)
-  rates = np.zeros(MODEL_SIZE)
-  midpoint = MODEL_SIZE // 2
-  rates[4:midpoint] = curvature * speed
-  rates[midpoint:MODEL_SIZE - 4] = -curvature * speed
-  model.orientationRate.z = rates.tolist()
-  model.meta = SimpleNamespace(laneChangeState=log.LaneChangeState.laneChangeStarting)
-  return model
-
-
 def update(limiter, model, strength=100, speed=25.0, cruise=35.0,
            enabled=True, overriding=False, previous_accel=0.0):
   return limiter.update(model, speed, cruise, strength, enabled, overriding, previous_accel)
