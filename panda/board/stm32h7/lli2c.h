@@ -37,7 +37,8 @@ static bool i2c_write_reg(I2C_TypeDef *I2C, uint8_t addr, uint8_t reg, uint8_t v
 
     // check if we lost arbitration
     if ((I2C->ISR & I2C_ISR_ARLO) != 0U) {
-      register_set_bits(&I2C->ICR, I2C_ICR_ARLOCF);
+      // ICR is write-one-to-clear and must not enter the register integrity map.
+      I2C->ICR = I2C_ICR_ARLOCF;
     } else {
       ret = true;
       break;
@@ -83,7 +84,7 @@ static bool i2c_read_reg(I2C_TypeDef *I2C, uint8_t addr, uint8_t reg, uint8_t *v
 
     // check if we lost arbitration
     if ((I2C->ISR & I2C_ISR_ARLO) != 0U) {
-      register_set_bits(&I2C->ICR, I2C_ICR_ARLOCF);
+      I2C->ICR = I2C_ICR_ARLOCF;
     } else {
       ret = true;
       break;
@@ -110,7 +111,7 @@ static bool i2c_read_reg(I2C_TypeDef *I2C, uint8_t addr, uint8_t reg, uint8_t *v
 
   // check if we lost arbitration
   if ((I2C->ISR & I2C_ISR_ARLO) != 0U) {
-    register_set_bits(&I2C->ICR, I2C_ICR_ARLOCF);
+    I2C->ICR = I2C_ICR_ARLOCF;
     ret = false;
     goto end;
   }
