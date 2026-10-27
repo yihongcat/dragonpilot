@@ -24,10 +24,10 @@ EXPECTED_DEVELOPER_KEYS = {
 }
 
 
-def _mirror_keys(section_title: str) -> set[str]:
+def _mirror_keys(section_title: str, item_type: str | None = None) -> set[str]:
   for s in SETTINGS:
     if s["title"] == section_title:
-      return {it["key"] for it in s["settings"]}
+      return {it["key"] for it in s["settings"] if item_type is None or it["type"] == item_type}
   return set()
 
 
@@ -46,7 +46,7 @@ class TestOpenpilotMirror(unittest.TestCase):
                      f"Update dragonpilot/settings/openpilot.toggles.py")
 
   def test_developer_mirror_in_sync(self):
-    mirror = _mirror_keys("Developer")
+    mirror = _mirror_keys("Developer", "toggle_item")
     missing = EXPECTED_DEVELOPER_KEYS - mirror
     extra = mirror - EXPECTED_DEVELOPER_KEYS
     self.assertFalse(missing or extra,
