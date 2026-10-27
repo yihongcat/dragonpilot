@@ -76,15 +76,16 @@ run_unit_tests() {
 }
 
 run_native_bootstrap() {
-  if uv run --python 3.12 --extra tools python -c "from msgq.visionipc import VisionStreamType; from openpilot.common.params import Params" >/dev/null 2>&1; then
+  if uv run --python 3.12 --extra tools python -c "from msgq.visionipc import VisionIpcClient; from openpilot.common.params import Params; from openpilot.selfdrive.controls.lib.longitudinal_planner import LongitudinalPlanner" >/dev/null 2>&1; then
     return
   fi
 
-  stage "Gate 1: native messaging bootstrap"
+  stage "Gate 1: native messaging and MPC bootstrap"
   uv run --python 3.12 --extra tools scons -j4 \
     openpilot/common/libparams_c.so \
     msgq_repo/msgq/ipc_pyx.so \
-    msgq_repo/msgq/visionipc/visionipc_pyx.so
+    msgq_repo/msgq/visionipc/visionipc_pyx.so \
+    openpilot/selfdrive/controls/lib/longitudinal_mpc_lib/c_generated_code/acados_ocp_solver_pyx.so
 }
 
 run_quick() {
