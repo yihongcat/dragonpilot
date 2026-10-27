@@ -37,6 +37,7 @@ class TestOpenpilotMirror(unittest.TestCase):
     upstream = set(TogglesLayout()._toggle_defs.keys())
     # Plus LongitudinalPersonality (multi-button widget, exposed alongside toggles in upstream UI).
     upstream.add("LongitudinalPersonality")
+    upstream.add("InitialCruiseSpeedKph")
     mirror = _mirror_keys("Openpilot")
     missing = upstream - mirror
     extra = mirror - upstream
