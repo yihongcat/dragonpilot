@@ -1,4 +1,10 @@
+import libusb
+
 Import('env', 'common', 'messaging')
+
+# AGNOS 20.1 ships USB headers/libraries in comma-deps-libusb.
+env = env.Clone()
+env.Append(CPPPATH=[libusb.INCLUDE_DIR], LIBPATH=[libusb.LIB_DIR])
 
 libs = ['usb-1.0', common, messaging, 'pthread']
 panda = env.Library('panda', ['panda.cc', 'panda_comms.cc', 'spi.cc'])
