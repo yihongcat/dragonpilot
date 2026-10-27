@@ -59,7 +59,7 @@ run_integrity_checks() {
 
 run_unit_tests() {
   stage "Gate 1: camera capability, UI/manager startup, planner compatibility, and curve-deceleration tests"
-  uv run --python 3.12 --with pytest pytest -q \
+  uv run --python 3.12 --extra tools --with pytest pytest -q \
     openpilot/system/hardware/tests/test_capabilities.py \
     openpilot/system/manager/test/test_recording_policy.py \
     openpilot/system/ui/lib/tests/test_application.py \
@@ -76,12 +76,12 @@ run_unit_tests() {
 }
 
 run_native_bootstrap() {
-  if uv run --python 3.12 python -c "from msgq.visionipc import VisionStreamType; from openpilot.common.params import Params" >/dev/null 2>&1; then
+  if uv run --python 3.12 --extra tools python -c "from msgq.visionipc import VisionStreamType; from openpilot.common.params import Params" >/dev/null 2>&1; then
     return
   fi
 
   stage "Gate 1: native messaging bootstrap"
-  uv run --python 3.12 scons -j4 \
+  uv run --python 3.12 --extra tools scons -j4 \
     openpilot/common/libparams_c.so \
     msgq_repo/msgq/ipc_pyx.so \
     msgq_repo/msgq/visionipc/visionipc_pyx.so
@@ -95,7 +95,7 @@ run_quick() {
 
 run_build() {
   stage "Gate 2: full SCons build"
-  uv run --python 3.12 scons -j4
+  uv run --python 3.12 --extra tools scons -j4
 }
 
 run_replay() {
@@ -103,7 +103,7 @@ run_replay() {
   # The current upstream selfdrived always emits the normal startup alert, while
   # the published replay reference still contains the retired startupMaster alert.
   # Ignore only those known startup presentation fields; all other outputs remain strict.
-  uv run --python 3.12 \
+  uv run --python 3.12 --extra tools \
     python openpilot/selfdrive/test/process_replay/test_processes.py \
       --whitelist-procs card selfdrived controlsd plannerd \
       --whitelist-cars TOYOTA \
@@ -120,7 +120,7 @@ run_sim() {
   stage "Gate 4: official MetaDrive simulation"
   BLOCK="${BLOCK:-},journald,soundd" DP_CPU_ONLY_SIMULATION=1 CI=1 \
     xvfb-run -a -s "-screen 0 1920x1080x24" \
-    uv run --python 3.12 \
+    uv run --python 3.12 --extra tools \
     --with "${METADRIVE_DEP}" \
     --with pytest \
     python -m pytest -q \
