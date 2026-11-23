@@ -5,7 +5,8 @@
   const PAGE_SIZE = 25;
   let data = null, page = 0, busy = false, policyDirty = false;
   const size = (bytes) => bytes >= 1024 ** 3 ? `${(bytes / 1024 ** 3).toFixed(1)} GB` : `${(bytes / 1024 ** 2).toFixed(1)} MB`;
-  const date = (mtime) => new Date(mtime * 1000).toLocaleString("zh-CN", { hour12: false });
+  const date = (stamp) => new Date(stamp * 1000).toLocaleString("sv-SE", { timeZone: "Asia/Shanghai", hour12: false });
+  const recordingTime = (item) => `${date(item.startTime)}${item.timeSource === "file" ? "（文件时间，估算）" : ""}`;
   function status(text, error = false) { $("status").textContent = text; $("status").classList.toggle("error", error); }
   function node(tag, text, className) {
     const element = document.createElement(tag);
@@ -22,7 +23,7 @@
   }
   function filtered() {
     const query = $("search").value.trim().toLowerCase();
-    return (data?.routes || []).filter(r => `${r.id} ${date(r.mtime)}`.toLowerCase().includes(query));
+    return (data?.routes || []).filter(r => `${r.id} ${recordingTime(r)} ${r.segments.map(recordingTime).join(" ")}`.toLowerCase().includes(query.replaceAll("/", "-")));
   }
   function render() {
     if (!data) return;
@@ -58,15 +59,16 @@
       checkbox.setAttribute("aria-label", `选择行程 ${route.id}`);
       checkbox.addEventListener("change", () => { checkbox.checked ? selected.add(route.id) : selected.delete(route.id); render(); });
       choice.append(checkbox);
-      const info = node("td"); info.append(node("div", date(route.mtime)), node("div", route.id, "route-id"));
+      const info = node("td"); info.append(node("div", recordingTime(route)), node("div", `最后写入：${date(route.mtime)}`, "route-id"), node("div", route.id, "route-id"));
       const details = node("details"), summary = node("summary", `${route.segments.length} 段录像`), segments = node("div", undefined, "segments");
       for (const segment of route.segments) {
+        const label = `${recordingTime(segment)} · 第 ${segment.number + 1} 段`;
         const video = segment.videos.find(v => v.name === "qcamera.ts");
         if (video) {
-          const preview = node("a", `预览第 ${segment.number + 1} 段 · ${size(video.bytes)}`);
+          const preview = node("a", `${label} · 预览 · ${size(video.bytes)}`);
           preview.href = `/api/play?file=${encodeURIComponent(video.path)}`; preview.target = "_blank"; preview.rel = "noopener";
           segments.append(preview);
-        } else segments.append(node("p", `第 ${segment.number + 1} 段 · ${segment.videos.length ? "导出后查看原始录像" : "仅行车日志"}`));
+        } else segments.append(node("p", `${label} · ${segment.videos.length ? "导出后查看原始录像" : "仅行车日志"}`));
       }
       details.append(summary, segments); info.append(details);
       const state = node("td"), badge = node("span", route.locked ? "记录 / 导出中" : "已完成", `badge${route.locked ? " locked" : ""}`);

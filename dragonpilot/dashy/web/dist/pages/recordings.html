@@ -38,19 +38,19 @@
     </section>
 
     <section class="library">
-      <div class="section-heading"><div><h2>本地行程 <span id="route-count">0</span></h2><p>ZIP 导出包含整段行程的录像和日志，不会在设备上创建额外副本。</p></div><button id="refresh" class="secondary">刷新</button></div>
+      <div class="section-heading"><div><h2>本地行程 <span id="route-count">0</span></h2><p>按北京时间（UTC+8）查找录像，导出的 ZIP 和视频文件名包含日期、时分秒。</p></div><button id="refresh" class="secondary">刷新</button></div>
       <div class="toolbar">
-        <label class="search">搜索行程<input id="search" type="search" placeholder="日期或行程编号"></label>
+        <label class="search">搜索行程<input id="search" type="search" placeholder="如 2026-11-23 或 14:30"></label>
         <label class="older">选择早于<select id="older-days"><option value="7">7 天</option><option value="30">30 天</option><option value="90">90 天</option></select></label>
         <button id="select-old" class="secondary">选中旧行程</button>
         <button id="delete" class="danger" disabled>删除所选（0）</button>
       </div>
       <div class="table-wrap"><table>
-        <thead><tr><th><input id="select-all" type="checkbox" aria-label="选择本页已完成行程"></th><th>行程 / 最后记录时间</th><th>大小</th><th>状态</th><th>操作</th></tr></thead>
+        <thead><tr><th><input id="select-all" type="checkbox" aria-label="选择本页已完成行程"></th><th>行程开始时间（北京时间）</th><th>大小</th><th>状态</th><th>操作</th></tr></thead>
         <tbody id="routes"></tbody>
       </table></div>
       <div class="pagination"><button id="previous" class="secondary">上一页</button><span id="page-label"></span><button id="next" class="secondary">下一页</button></div>
-      <p class="note">删除不可恢复，请先导出需要保留的行程。可在停车后操作删除、设置和导出；行车途中导出会停止。预览使用低清道路录像，HEVC 原始录像可在导出后用支持该格式的播放器打开。</p>
+      <p class="note">时间取自设备录制时钟；缺少时间日志的旧录像会标为估算，导出名称含 estimated。ZIP 包含行程录像和日志，不在设备上创建额外副本。删除不可恢复，请先导出需要保留的行程。可在停车后操作删除、设置和导出；行车途中导出会停止。预览使用低清道路录像，HEVC 原始录像可在导出后用支持该格式的播放器打开。</p>
     </section>
   </main>
 </body>

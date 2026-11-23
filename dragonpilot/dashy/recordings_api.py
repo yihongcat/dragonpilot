@@ -13,11 +13,12 @@ from urllib.parse import urlsplit
 
 from aiohttp import web
 
+from dragonpilot.dashy.recording_times import add_recording_times, recording_date, segment_times
 from openpilot.cereal import log
 from openpilot.common.hardware import HARDWARE, PC
 from openpilot.system.loggerd.deleter import MIN_BYTES, MIN_PERCENT
 from openpilot.system.loggerd.recordings import (
-  GIB, RecordingPolicy, clear_stale_locks, delete_recording, export_recording,
+  GIB, VIDEO_FILES, RecordingPolicy, clear_stale_locks, delete_recording, export_recording,
   recording_inventory, recording_lock,
   current_recording_route, open_recording_directories,
 )
@@ -115,7 +116,7 @@ async def list_recordings(request):
 
   def inventory():
     # Inventory is read-only; deleter owns recovery of stale recorder locks.
-    routes = recording_inventory(root, current_route(params))
+    routes = add_recording_times(root, recording_inventory(root, current_route(params)))
     usage = shutil.disk_usage(root)
     return {"routes": routes, "storage": {"total": usage.total, "free": usage.free, "used": usage.used,
                                          "recordings": sum(r["bytes"] for r in routes)}}
@@ -214,6 +215,15 @@ async def download_route(request):
   route_id = request.match_info['route_id']
   context = export_recording(root, route_id, current_route(params))
   files = await asyncio.to_thread(context.__enter__)
+  try:
+    # The held export locks protect the files while we read their log headers.
+    times = await asyncio.to_thread(lambda: {p.name: segment_times(p) for p in {f.parent for f in files}})
+    logged = [t for t in times.values() if t['timeSource'] == 'log']
+    start = min(t['routeStartTime'] for t in (logged or list(times.values())))
+    filename = f"{recording_date(start, 'log' if logged else 'file')}--{route_id}.zip"
+  except BaseException:
+    await asyncio.to_thread(context.__exit__, None, None, None)
+    raise
   stop = threading.Event()
   queue = asyncio.Queue(maxsize=4)
   loop = asyncio.get_running_loop()
@@ -226,7 +236,10 @@ async def download_route(request):
         for path in files:
           if stop.is_set():
             return
-          info = zipfile.ZipInfo.from_file(path, arcname=f"{path.parent.name}/{path.name}", strict_timestamps=False)
+          timing = times[path.parent.name]
+          date = recording_date(timing['startTime'], timing['timeSource'])
+          name = f'{date}_{path.name}' if path.name in VIDEO_FILES else path.name
+          info = zipfile.ZipInfo.from_file(path, arcname=f"{date}--{path.parent.name}/{name}", strict_timestamps=False)
           with path.open('rb') as source, output.open(info, 'w', force_zip64=True) as target:
             while chunk := source.read(256 * 1024):
               if stop.is_set():
@@ -248,7 +261,7 @@ async def download_route(request):
 
   worker = threading.Thread(target=archive, name="recording-export", daemon=True)
   response = web.StreamResponse(headers={'Content-Type': 'application/zip',
-                                        'Content-Disposition': f'attachment; filename="{route_id}.zip"',
+                                        'Content-Disposition': f'attachment; filename="{filename}"',
                                         'Cache-Control': 'no-store'})
   worker.start()
   try:

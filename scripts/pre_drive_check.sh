@@ -65,6 +65,7 @@ run_unit_tests() {
     openpilot/system/ui/lib/tests/test_application.py \
     dragonpilot/dashy/tests/test_serverd_startup.py \
     dragonpilot/dashy/tests/test_recordings_api.py \
+    dragonpilot/dashy/tests/test_recording_times.py \
     dragonpilot/dashy/tests/test_live_tracks.py \
     openpilot/system/loggerd/tests/test_recordings.py \
     openpilot/system/loggerd/tests/test_deleter.py \

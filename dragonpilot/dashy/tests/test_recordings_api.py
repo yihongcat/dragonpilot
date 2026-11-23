@@ -1,5 +1,6 @@
 import asyncio
 import io
+import os
 import threading
 import zipfile
 from types import SimpleNamespace
@@ -9,6 +10,7 @@ from aiohttp import web
 from aiohttp.test_utils import TestClient, TestServer
 
 from dragonpilot.dashy import recordings_api as api
+from dragonpilot.dashy.tests.test_recording_times import START, write_timing_log
 from openpilot.system.loggerd.tests.test_recordings import ROUTE, OTHER, make_segment
 
 
@@ -238,7 +240,10 @@ def test_reject_cross_site_and_non_json_requests(tmp_path):
 
 def test_wifi_export_is_valid_zip_with_original_video_and_logs(tmp_path):
   first = make_segment(tmp_path)
-  make_segment(tmp_path, number=1)
+  second = make_segment(tmp_path, number=1)
+  write_timing_log(first)
+  write_timing_log(second, offset=60)
+  original_log = (second / 'qlog.zst').read_bytes()
 
   params = TestParams()
   params.values['CurrentRoute'] = ROUTE  # The last drive remains in Params while parked.
@@ -247,14 +252,30 @@ def test_wifi_export_is_valid_zip_with_original_video_and_logs(tmp_path):
     async with client(tmp_path, params) as browser:
       response = await browser.get(f'/api/recordings/{ROUTE}/download')
       assert response.status == 200
-      assert response.headers['Content-Disposition'] == f'attachment; filename="{ROUTE}.zip"'
+      assert response.headers['Content-Disposition'] == f'attachment; filename="2026-11-23_14-30-05+0800--{ROUTE}.zip"'
       with zipfile.ZipFile(io.BytesIO(await response.read())) as archive:
         assert len(archive.namelist()) == 4
-        assert archive.read(f'{ROUTE}--0/fcamera.hevc') == b'video-data'
-        assert archive.read(f'{ROUTE}--1/qlog.zst') == b'log-data'
+        assert archive.read(f'2026-11-23_14-30-05+0800--{ROUTE}--0/2026-11-23_14-30-05+0800_fcamera.hevc') == b'video-data'
+        assert archive.read(f'2026-11-23_14-31-05+0800--{ROUTE}--1/qlog.zst') == original_log
   asyncio.run(run())
   assert not (first / '.export.lock').exists()
   assert len(list(tmp_path.iterdir())) == 2  # No temporary ZIP stored beside recordings.
+
+
+def test_list_and_export_label_file_time_estimates(tmp_path):
+  segment = make_segment(tmp_path)
+  for file in segment.iterdir():
+    os.utime(file, (START, START))
+
+  async def run():
+    async with client(tmp_path, TestParams()) as browser:
+      route = (await (await browser.get('/api/recordings')).json())['routes'][0]
+      assert route['startTime'] == START and route['timeSource'] == 'file'
+      response = await browser.get(f'/api/recordings/{ROUTE}/download')
+      assert '2026-11-23_14-30-05+0800_estimated--' in response.headers['Content-Disposition']
+      with zipfile.ZipFile(io.BytesIO(await response.read())) as archive:
+        assert any('_estimated_fcamera.hevc' in name for name in archive.namelist())
+  asyncio.run(run())
 
 
 def test_export_requires_wifi_on_device(tmp_path, monkeypatch):
