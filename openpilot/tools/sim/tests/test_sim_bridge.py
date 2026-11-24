@@ -26,7 +26,9 @@ class TestSimBridgeBase(OpenpilotTestCase):
     p_manager = subprocess.Popen("./launch_openpilot.sh", cwd=SIM_DIR)
     self.processes.append(p_manager)
 
-    sm = messaging.SubMaster(['selfdriveState', 'onroadEvents', 'managerState'])
+    sm = messaging.SubMaster(['selfdriveState', 'onroadEvents', 'managerState', 'carState', 'carControl',
+                              'longitudinalPlan', 'modelV2'])
+    health_services = ['selfdriveState', 'onroadEvents', 'managerState']
     q = Queue()
     bridge = self.create_bridge()
     p_bridge = bridge.run(q, retries=10)
@@ -50,7 +52,7 @@ class TestSimBridgeBase(OpenpilotTestCase):
       not_running = [p.name for p in sm['managerState'].processes if not p.running and p.shouldBeRunning]
       car_event_issues = [event.name for event in sm['onroadEvents'] if any([event.noEntry, event.softDisable, event.immediateDisable])]
 
-      if sm.all_alive() and len(car_event_issues) == 0 and len(not_running) == 0:
+      if sm.all_alive(health_services) and len(car_event_issues) == 0 and len(not_running) == 0:
         no_car_events_issues_once = True
         break
 
@@ -64,7 +66,7 @@ class TestSimBridgeBase(OpenpilotTestCase):
     while time.monotonic() < start_time + max_time_per_step:
       sm.update()
 
-      if sm.all_alive() and sm['selfdriveState'].active:
+      if sm.all_alive(health_services) and sm['selfdriveState'].active:
         control_active += 1
 
         if control_active == min_counts_control_active:
@@ -73,8 +75,12 @@ class TestSimBridgeBase(OpenpilotTestCase):
     assert min_counts_control_active == control_active, f"Simulator did not engage a minimal of {min_counts_control_active} steps was {control_active}"
 
     failure_states = []
+    max_speed = 0.0
+    max_commanded_accel = float('-inf')
     while bridge.started.value:
-      continue
+      sm.update(100)
+      max_speed = max(max_speed, sm['carState'].vEgo)
+      max_commanded_accel = max(max_commanded_accel, sm['carControl'].actuators.accel)
 
     while not q.empty():
       state = q.get()
@@ -82,7 +88,11 @@ class TestSimBridgeBase(OpenpilotTestCase):
         done_info = state.info
         failure_states = [done_state for done_state in done_info if done_state != "timeout" and done_info[done_state]]
         break
-    assert len(failure_states) == 0, f"Simulator fails to finish a loop. Failure states: {failure_states}"
+    assert len(failure_states) == 0, (
+      f"Simulator failed: {failure_states}; peak speed {max_speed:.2f} m/s, peak acceleration command "
+      f"{max_commanded_accel:.2f} m/s², final target {sm['longitudinalPlan'].aTarget:.2f} m/s², "
+      f"model target {sm['modelV2'].action.desiredAcceleration:.2f} m/s²"
+    )
 
   def teardown_method(self):
     print("Test shutting down. CommIssues are acceptable")
