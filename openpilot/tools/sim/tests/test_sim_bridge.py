@@ -53,6 +53,7 @@ class TestSimBridgeBase(OpenpilotTestCase):
 
     start_time = time.monotonic()
     no_car_events_issues_once = False
+    synchronized_road_frames_seen = False
     car_event_issues = []
     not_running = []
     while time.monotonic() < start_time + max_time_per_step:
@@ -61,13 +62,17 @@ class TestSimBridgeBase(OpenpilotTestCase):
       not_running = [p.name for p in sm['managerState'].processes if not p.running and p.shouldBeRunning]
       car_event_issues = [event.name for event in sm['onroadEvents'] if any([event.noEntry, event.softDisable, event.immediateDisable])]
 
-      camera_ready = not expect_no_driver_camera or params.get('DriverCameraPresent') is False
+      if expect_no_driver_camera:
+        narrow = sm['narrowRoadCameraState']
+        wide = sm['wideRoadCameraState']
+        synchronized_road_frames_seen |= narrow.frameId == wide.frameId and narrow.timestampSof == wide.timestampSof > 0
+      camera_ready = not expect_no_driver_camera or (synchronized_road_frames_seen and params.get('DriverCameraPresent') is False)
       if camera_ready and sm.all_alive(health_services) and sm.seen['carParams'] and not car_event_issues and not not_running:
         no_car_events_issues_once = True
         break
 
     assert no_car_events_issues_once, \
-                    f"Failed because no messages received, or CarEvents '{car_event_issues}' or processes not running '{not_running}'"
+                    f"Startup incomplete: events {car_event_issues}, stopped processes {not_running}, no-driver-camera readiness {camera_ready}"
 
     start_time = time.monotonic()
     min_counts_control_active = 100
@@ -87,13 +92,16 @@ class TestSimBridgeBase(OpenpilotTestCase):
       assert params.get('DriverCameraPresent') is False
       assert sm.seen['narrowRoadCameraState'] and sm.seen['wideRoadCameraState']
       assert not sm.seen['cabinCameraState'] and not sm.seen['driverMonitoringState']
+      assert sm.seen['modelV2'] and sm.seen['longitudinalPlan']
       monitoring_processes = ('dmonitoringd', 'dmonitoringmodeld')
       assert not any(p.shouldBeRunning or p.running for p in sm['managerState'].processes if p.name in monitoring_processes)
       assert not any(event.name in ('cameraMalfunction', 'commIssue') for event in sm['onroadEvents'])
 
     max_speed = 0.0
     max_commanded_accel = float('-inf')
-    finish_deadline = time.monotonic() + 240
+    # Rendering both roads in software takes longer for the same physics time.
+    finish_timeout = 420 if expect_no_driver_camera and os.getenv("DP_CPU_ONLY_SIMULATION") == "1" else 240
+    finish_deadline = time.monotonic() + finish_timeout
     while bridge.started.value and time.monotonic() < finish_deadline:
       sm.update(100)
       max_speed = max(max_speed, sm['carState'].vEgo)

@@ -97,12 +97,14 @@ class SimulatedSensors:
 
   def send_camera_images(self, world: 'World'):
     world.image_lock.acquire()
+    # Both views come from the same simulation step.
+    timestamp = time.monotonic_ns()
     yuv = self.camerad.rgb_to_yuv(world.road_image)
-    self.camerad.cam_send_yuv_road(yuv)
+    self.camerad.cam_send_yuv_road(yuv, timestamp)
 
     if world.dual_camera:
       yuv = self.camerad.rgb_to_yuv(world.wide_road_image)
-      self.camerad.cam_send_yuv_wide_road(yuv)
+      self.camerad.cam_send_yuv_wide_road(yuv, timestamp)
 
   def update(self, simulator_state: 'SimulatorState', world: 'World'):
     now = time.monotonic()

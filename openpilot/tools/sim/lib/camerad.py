@@ -57,12 +57,12 @@ class Camerad:
 
     self.vipc_server.start_listener()
 
-  def cam_send_yuv_road(self, yuv):
-    self._send_yuv(yuv, self.frame_road_id, 'narrowRoadCameraState', VisionStreamType.VISION_STREAM_NARROW_ROAD)
+  def cam_send_yuv_road(self, yuv, timestamp):
+    self._send_yuv(yuv, self.frame_road_id, 'narrowRoadCameraState', VisionStreamType.VISION_STREAM_NARROW_ROAD, timestamp)
     self.frame_road_id += 1
 
-  def cam_send_yuv_wide_road(self, yuv):
-    self._send_yuv(yuv, self.frame_wide_id, 'wideRoadCameraState', VisionStreamType.VISION_STREAM_WIDE_ROAD)
+  def cam_send_yuv_wide_road(self, yuv, timestamp):
+    self._send_yuv(yuv, self.frame_wide_id, 'wideRoadCameraState', VisionStreamType.VISION_STREAM_WIDE_ROAD, timestamp)
     self.frame_wide_id += 1
 
   def rgb_to_yuv(self, rgb):
@@ -71,12 +71,14 @@ class Camerad:
     assert rgb.dtype == np.uint8
     return rgb_to_nv12(rgb)
 
-  def _send_yuv(self, yuv, frame_id, pub_type, yuv_type):
+  def _send_yuv(self, yuv, frame_id, pub_type, yuv_type, timestamp):
     dat = messaging.new_message(pub_type, valid=True)
-    self.vipc_server.send(yuv_type, yuv, frame_id, dat.logMonoTime, dat.logMonoTime)
+    self.vipc_server.send(yuv_type, yuv, frame_id, timestamp, timestamp)
 
     msg = {
       "frameId": frame_id,
+      "timestampSof": timestamp,
+      "timestampEof": timestamp,
       "transform": [1.0, 0.0, 0.0,
                     0.0, 1.0, 0.0,
                     0.0, 0.0, 1.0]
