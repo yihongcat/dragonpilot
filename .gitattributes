@@ -34,3 +34,4 @@ openpilot/selfdrive/assets/sounds/dm_critical_max.wav filter=lfs diff=lfs merge=
 openpilot/selfdrive/assets/sounds/warning.wav filter=lfs diff=lfs merge=lfs -text
 openpilot/selfdrive/modeld/models/dmonitoring_model.onnx filter=lfs diff=lfs merge=lfs -text
 openpilot/selfdrive/modeld/models/driving_supercombo.onnx filter=lfs diff=lfs merge=lfs -text
+openpilot/selfdrive/assets/emoji.npz filter=lfs diff=lfs merge=lfs -text

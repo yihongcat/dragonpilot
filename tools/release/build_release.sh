@@ -78,7 +78,7 @@ find . -name '*.os' -delete
 find . -name '*.pyc' -delete
 find . -name 'moc_*' -delete
 find . -name '__pycache__' -delete
-rm -rf .sconsign.dblite tools/release/
+rm -rf .sconsign.dblite tools/release/ alfred.toml
 rm -f openpilot/selfdrive/modeld/models/*.onnx*
 
 # Mark as prebuilt release

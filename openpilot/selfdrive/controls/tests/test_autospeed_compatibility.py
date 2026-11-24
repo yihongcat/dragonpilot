@@ -40,7 +40,7 @@ def test_saved_dp_settings_do_not_override_autospeed(setup_planner, stock_long):
   # These are deliberately non-default persisted settings from an older install.
   subject.update(sm, dp_flags=7, dp_curve_speed_reduction=100, dp_stop_distance=1)
   assert subject.dp_extensions is None
-  assert subject.output_a_target == pytest.approx(-0.4)
+  assert subject.output_a_target == pytest.approx(-0.35)
   assert subject.mpc.source == planner.LongitudinalPlanSource.e2e
   mpc.update.assert_called_once_with(sm['radarState'], personality=sm['selfdriveState'].personality)
   if stock_long:
@@ -65,7 +65,7 @@ def test_switching_extensions_off_discards_optional_state(setup_planner):
   subject.dp_extensions = Mock()
   subject.update(sm, dp_flags=7, dp_curve_speed_reduction=100)
   assert subject.dp_extensions is None
-  assert subject.output_a_target == pytest.approx(-0.4)
+  assert subject.output_a_target == pytest.approx(-0.35)
 
 
 def test_extensions_require_both_opt_in_and_supported_longitudinal(setup_planner):

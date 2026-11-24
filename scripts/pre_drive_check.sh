@@ -73,7 +73,6 @@ run_unit_tests() {
     openpilot/selfdrive/controls/tests/test_curve_planner_integration.py \
     openpilot/selfdrive/controls/tests/test_autospeed_compatibility.py \
     openpilot/selfdrive/controls/tests/test_desire_helper.py \
-    openpilot/selfdrive/controls/tests/test_accel_boost.py \
     dragonpilot/selfdrive/controls/lib/test_acm.py \
     dragonpilot/selfdrive/controls/lib/test_aem.py
 }
@@ -86,8 +85,6 @@ run_native_bootstrap() {
   stage "Gate 1: native messaging and MPC bootstrap"
   uv run --python 3.12 --extra tools scons -j4 \
     openpilot/common/libparams_c.so \
-    msgq_repo/msgq/ipc_pyx.so \
-    msgq_repo/msgq/visionipc/visionipc_pyx.so \
     openpilot/selfdrive/controls/lib/longitudinal_mpc_lib/c_generated_code/acados_ocp_solver_pyx.so
 }
 

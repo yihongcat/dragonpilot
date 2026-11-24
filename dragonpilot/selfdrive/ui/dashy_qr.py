@@ -1,9 +1,9 @@
+import io
 import socket
 import time
 
-import pyray as rl
+import raylib_nb as rl
 import qrcode
-import numpy as np
 from openpilot.common.swaglog import cloudlog
 
 IP_REFRESH_INTERVAL = 5  # seconds
@@ -48,19 +48,18 @@ class DashyQR:
       qr.make(fit=True)
 
       pil_img = qr.make_image(fill_color="white", back_color="black").convert('RGBA')
-      img_array = np.array(pil_img, dtype=np.uint8)
+      with io.BytesIO() as png:
+        pil_img.save(png, format='PNG')
+        image_data = png.getvalue()
 
       if self._qr_texture and self._qr_texture.id != 0:
         rl.unload_texture(self._qr_texture)
 
-      rl_image = rl.Image()
-      rl_image.data = rl.ffi.cast("void *", img_array.ctypes.data)
-      rl_image.width = pil_img.width
-      rl_image.height = pil_img.height
-      rl_image.mipmaps = 1
-      rl_image.format = rl.PixelFormat.PIXELFORMAT_UNCOMPRESSED_R8G8B8A8
-
-      self._qr_texture = rl.load_texture_from_image(rl_image)
+      image = rl.load_image_from_memory('.png', image_data, len(image_data))
+      try:
+        self._qr_texture = rl.load_texture_from_image(image)
+      finally:
+        rl.unload_image(image)
       self._last_qr_url = url
     except Exception as e:
       cloudlog.warning(f"QR code generation failed: {e}")

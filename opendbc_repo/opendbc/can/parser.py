@@ -1,6 +1,7 @@
 import math
 import numbers
 from collections import defaultdict, deque
+from collections.abc import Sequence
 from dataclasses import dataclass, field
 
 from opendbc.car.carlog import carlog
@@ -77,7 +78,7 @@ class MessageState:
     if self.frequency < 1e-5 and len(self.timestamps) >= 3:
       dt = (self.timestamps[-1] - self.timestamps[0]) * 1e-9
       if (dt > 1.0 or (self.timestamps.maxlen is not None and len(self.timestamps) >= self.timestamps.maxlen)) and dt != 0:
-        self.frequency = min(len(self.timestamps) / dt, 100.0)
+        self.frequency = min((len(self.timestamps) - 1) / dt, 100.0)
         self.timeout_threshold = (1_000_000_000 / self.frequency) * 10
     return True
 
@@ -111,7 +112,7 @@ class VLDict(dict):
 
 
 class CANParser:
-  def __init__(self, dbc_name: str, messages: list[tuple[str | int, int]], bus: int):
+  def __init__(self, dbc_name: str, messages: Sequence[tuple[str | int, float]], bus: int):
     self.dbc_name: str = dbc_name
     self.bus: int = bus
     self.dbc = DBC(dbc_name)
@@ -139,7 +140,7 @@ class CANParser:
     self._last_update_nanos: int = 0
     self._last_invalid_log_nanos: int | None = None
 
-  def _add_message(self, name_or_addr: str | int, freq: int | None = None) -> None:
+  def _add_message(self, name_or_addr: str | int, freq: float | None = None) -> None:
     if isinstance(name_or_addr, numbers.Number):
       msg = self.dbc.addr_to_msg.get(int(name_or_addr))
     else:
