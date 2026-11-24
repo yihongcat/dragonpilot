@@ -1,3 +1,5 @@
+#include <Python.h>
+
 #include <cstdint>
 #include <cstring>
 #include <optional>

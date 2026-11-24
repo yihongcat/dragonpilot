@@ -1,3 +1,5 @@
+#include <Python.h>
+
 #include <limits>
 #include <new>
 

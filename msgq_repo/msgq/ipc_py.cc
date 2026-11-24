@@ -1,3 +1,5 @@
+#include <Python.h>
+
 #include <cerrno>
 #include <chrono>
 #include <cstdint>
