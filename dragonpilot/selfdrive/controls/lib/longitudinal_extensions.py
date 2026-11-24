@@ -1,4 +1,6 @@
 """Optional DP longitudinal behavior. Native Autospeed does not instantiate this."""
+import math
+
 from openpilot.common.swaglog import cloudlog
 from openpilot.selfdrive.controls.lib.longcontrol import LongCtrlState
 from dragonpilot.selfdrive.controls.lib.acm import ACM
@@ -41,14 +43,22 @@ class LongitudinalExtensions:
         return candidates[:2]
     return candidates
 
-  def curve_accel(self, sm, strength, v_cruise, reset_state, base_accel, previous_accel):
+  def curve_accel(self, sm, strength, v_cruise, reset_state, base_accel, previous_accel, *, lookahead_time=6.0):
     v_ego = sm['carState'].vEgo
     override = sm['carControl'].cruiseControl.override
-    limit = self.curve.update(sm['modelV2'], v_ego, v_cruise, strength, not reset_state, override, previous_accel)
+    # Bank compensation is optional: unavailable/unlearned estimates retain the
+    # existing flat-road prediction and never invalidate the longitudinal plan.
+    roll = 0.0
+    if hasattr(sm, 'valid') and sm.valid.get('vehicleParameters', False) and sm.alive.get('vehicleParameters', False):
+      vehicle_params = sm['vehicleParameters']
+      if vehicle_params.valid and math.isfinite(vehicle_params.roll):
+        roll = vehicle_params.roll
+    limit = self.curve.update(sm['modelV2'], v_ego, v_cruise, strength, not reset_state, override, previous_accel,
+                              roll=roll, lookahead_time=lookahead_time)
     cap = self.curve_controller.update(limit, v_ego, not reset_state, override, previous_accel, base_accel)
     if strength > 0 and (limit.active != self.curve_active or getattr(sm, 'frame', 0) % 20 == 0):
-      cloudlog.info('dp_curve_speed active=%s cap_active=%s strength=%d v_ego=%.2f distance=%.2f required_decel=%.2f accel=%.2f',
-                    limit.active, cap.active, strength, v_ego, self.curve.target_distance, limit.required_decel, cap.accel)
+      cloudlog.info('dp_curve_speed active=%s cap_active=%s strength=%d v_ego=%.2f roll=%.4f distance=%.2f required_decel=%.2f accel=%.2f',
+                    limit.active, cap.active, strength, v_ego, roll, self.curve.target_distance, limit.required_decel, cap.accel)
     self.curve_active = limit.active
     # A curve cap never changes Autospeed's shouldStop decision or source.
     return min(base_accel, cap.accel) if cap.active else base_accel

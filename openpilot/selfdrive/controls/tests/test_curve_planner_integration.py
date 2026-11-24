@@ -1,6 +1,11 @@
+from types import SimpleNamespace
+from unittest.mock import Mock
+
 import numpy as np
+import pytest
 
 from openpilot.common.realtime import DT_MDL
+from dragonpilot.selfdrive.controls.lib.longitudinal_extensions import LongitudinalExtensions
 from dragonpilot.selfdrive.controls.lib.curve_speed_limiter import (
   CURVE_DECEL_JERK,
   MIN_CURVE_SPEED,
@@ -14,6 +19,32 @@ from dragonpilot.selfdrive.controls.lib.curve_speed_limiter import (
 CRUISE_SOURCE = "cruise"
 E2E_SOURCE = "e2e"
 LEAD_SOURCE = "lead"
+
+
+@pytest.mark.parametrize('message_valid,alive,learned,roll,expected', [
+  (True, True, True, 0.04, 0.04),
+  (False, True, True, 0.04, 0.0),
+  (True, False, True, 0.04, 0.0),
+  (True, True, False, 0.04, 0.0),
+  (True, True, True, float('nan'), 0.0),
+])
+def test_curve_bank_requires_live_valid_learned_vehicle_parameters(message_valid, alive, learned, roll, expected):
+  class SubMaster(dict):
+    pass
+
+  sm = SubMaster(
+    carState=SimpleNamespace(vEgo=25.0),
+    carControl=SimpleNamespace(cruiseControl=SimpleNamespace(override=False)),
+    modelV2=SimpleNamespace(),
+    vehicleParameters=SimpleNamespace(valid=learned, roll=roll),
+  )
+  sm.valid = {'vehicleParameters': message_valid}
+  sm.alive = {'vehicleParameters': alive}
+  sm.frame = 1
+  extensions = LongitudinalExtensions(SimpleNamespace(maxLateralAccel=1.8, longitudinalActuatorDelay=0.5), DT_MDL)
+  extensions.curve.update = Mock(return_value=CurveSpeedLimit())
+  assert extensions.curve_accel(sm, 50, 30.0, False, -1.0, -1.0) == -1.0
+  assert extensions.curve.update.call_args.kwargs['roll'] == expected
 
 
 def test_curve_acceleration_is_selected_without_requesting_stop():

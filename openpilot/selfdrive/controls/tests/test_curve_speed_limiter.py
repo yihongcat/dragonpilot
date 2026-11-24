@@ -2,8 +2,9 @@ import math
 from types import SimpleNamespace
 
 import numpy as np
+import pytest
 
-from openpilot.common.constants import CV
+from openpilot.common.constants import ACCELERATION_DUE_TO_GRAVITY, CV
 from openpilot.cereal import log
 from openpilot.common.realtime import DT_MDL
 from openpilot.selfdrive.modeld.constants import ModelConstants
@@ -62,8 +63,92 @@ def model_with_s_lane_change(curvature: float = 0.02, speed: float = 25.0):
 
 
 def update(limiter, model, strength=100, speed=25.0, cruise=35.0,
-           enabled=True, overriding=False, previous_accel=0.0):
-  return limiter.update(model, speed, cruise, strength, enabled, overriding, previous_accel)
+           enabled=True, overriding=False, previous_accel=0.0, roll=0.0, lookahead_time=None):
+  return limiter.update(model, speed, cruise, strength, enabled, overriding, previous_accel,
+                        roll=roll, lookahead_time=lookahead_time)
+
+
+def test_prediction_time_limits_candidates_by_model_timestamps():
+  model = model_with_curve(0.01, curve_start=18)
+  model.position.t = (np.asarray(model.position.x) / 25.0).tolist()
+  short = CurveSpeedLimiter(1.8)
+  long = CurveSpeedLimiter(1.8)
+  assert not update(short, model, lookahead_time=6.0).active
+  assert update(long, model, lookahead_time=8.0).active
+
+
+def test_near_curve_has_same_target_with_different_prediction_times():
+  model = model_with_curve(0.01, curve_start=5)
+  model.position.t = (np.asarray(model.position.x) / 25.0).tolist()
+  short = CurveSpeedLimiter(1.8)
+  long = CurveSpeedLimiter(1.8)
+  assert update(short, model, lookahead_time=4.0).active
+  assert update(long, model, lookahead_time=10.0).active
+  assert short.target_curve_speed == pytest.approx(long.target_curve_speed)
+  assert short.target_distance == pytest.approx(long.target_distance)
+
+
+def test_short_prediction_keeps_full_s_lane_change_rejection():
+  model = model_with_s_lane_change()
+  model.position.t = (np.asarray(model.position.x) / 25.0).tolist()
+  limiter = CurveSpeedLimiter(1.8)
+  assert not update(limiter, model, lookahead_time=4.0).active
+  assert not limiter.lane_change_road_turn
+
+
+@pytest.mark.parametrize('times', [[], [float('nan')] * MODEL_SIZE, [0.0] * MODEL_SIZE])
+def test_invalid_prediction_timestamps_clear_stale_curve(times):
+  model = model_with_curve(0.01)
+  model.position.t = (np.asarray(model.position.x) / 25.0).tolist()
+  limiter = CurveSpeedLimiter(1.8)
+  assert update(limiter, model, lookahead_time=6.0).active
+  model.position.t = times
+  assert not update(limiter, model, lookahead_time=6.0).active
+  assert math.isinf(limiter.target_curve_speed)
+
+
+@pytest.mark.parametrize('direction', [-1.0, 1.0])
+@pytest.mark.parametrize('bank', [-0.05, 0.0, 0.05])
+def test_curve_speed_solves_vehicle_lateral_budget_with_bank(direction, bank):
+  limiter = CurveSpeedLimiter(1.8)
+  curvature = 0.01 * direction
+  roll = direction * bank
+  update(limiter, model_with_curve(curvature), strength=1, roll=roll)
+  expected_speed = math.sqrt((1.8 + ACCELERATION_DUE_TO_GRAVITY * bank) / abs(curvature))
+  assert limiter.target_curve_speed == pytest.approx(expected_speed)
+  # Check the underlying signed acceleration, not just the speed formula.
+  tire_accel = limiter.target_curve_speed ** 2 * curvature - ACCELERATION_DUE_TO_GRAVITY * roll
+  assert abs(tire_accel) == pytest.approx(1.8)
+
+
+def test_model_already_slowing_does_not_hide_a_curve():
+  fast = CurveSpeedLimiter(1.8)
+  slow = CurveSpeedLimiter(1.8)
+  update(fast, model_with_curve(0.01, speed=25.0), strength=1, roll=0.03)
+  update(slow, model_with_curve(0.01, speed=10.0), strength=1, roll=0.03)
+  assert fast.target_curve_speed == pytest.approx(slow.target_curve_speed)
+  assert math.isfinite(slow.target_curve_speed)
+
+
+@pytest.mark.parametrize('roll', [-0.1, 0.1])
+def test_bank_does_not_invent_a_curve_on_a_straight_road(roll):
+  limiter = CurveSpeedLimiter(1.8)
+  result = update(limiter, model_with_curve(0.0), roll=roll)
+  assert not result.active
+  assert math.isinf(limiter.target_curve_speed)
+
+
+@pytest.mark.parametrize('roll', [math.nan, math.inf, -math.inf])
+def test_invalid_bank_retains_flat_road_prediction(roll):
+  limiter = CurveSpeedLimiter(1.8)
+  update(limiter, model_with_curve(0.01), strength=1, roll=roll)
+  assert limiter.target_curve_speed == pytest.approx(math.sqrt(1.8 / 0.01))
+
+
+def test_extreme_adverse_bank_keeps_curve_speed_finite_and_bounded():
+  limiter = CurveSpeedLimiter(1.8)
+  update(limiter, model_with_curve(0.01), strength=1, roll=-0.3)
+  assert limiter.target_curve_speed == MIN_CURVE_SPEED
 
 def confirmed_update(limiter, model, frames=8, **kwargs):
   position_x = np.asarray(model.position.x, dtype=float)

@@ -20,8 +20,9 @@ def main():
   ldw = LaneDepartureWarning()
   longitudinal_planner = LongitudinalPlanner(CP)
   pm = messaging.PubMaster(['longitudinalPlan', 'driverAssistance'])
-  sm = messaging.SubMaster(['carControl', 'carState', 'controlsState', 'radarState', 'modelV2', 'selfdriveState'],
-                           poll='modelV2')
+  sm = messaging.SubMaster(['carControl', 'carState', 'controlsState', 'radarState', 'modelV2', 'selfdriveState', 'vehicleParameters'],
+                           poll='modelV2', ignore_alive=['vehicleParameters'], ignore_avg_freq=['vehicleParameters'],
+                           ignore_valid=['vehicleParameters'])
 
   def read_dp_options():
     flags = 0
@@ -29,16 +30,18 @@ def main():
       if params.get_bool(key):
         flags |= flag
     return (params.get_bool("dp_lon_extensions_enabled"), flags,
-            int(params.get("dp_lon_curve_speed_reduction") or 0), int(params.get("dp_lon_stop_distance") or 6))
+            int(params.get("dp_lon_curve_speed_reduction") or 0), int(params.get("dp_lon_stop_distance") or 6),
+            int(params.get("dp_lon_curve_lookahead_seconds") or 6))
 
-  dp_enabled, dp_flags, dp_curve_speed_reduction, dp_stop_distance = read_dp_options()
+  dp_enabled, dp_flags, dp_curve_speed_reduction, dp_stop_distance, dp_curve_lookahead_seconds = read_dp_options()
 
   while True:
     sm.update()
     if sm.updated['modelV2']:
       if sm.frame % 20 == 0:
-        dp_enabled, dp_flags, dp_curve_speed_reduction, dp_stop_distance = read_dp_options()
-      longitudinal_planner.update(sm, dp_flags, dp_curve_speed_reduction, dp_stop_distance, dp_extensions_enabled=dp_enabled)
+        dp_enabled, dp_flags, dp_curve_speed_reduction, dp_stop_distance, dp_curve_lookahead_seconds = read_dp_options()
+      longitudinal_planner.update(sm, dp_flags, dp_curve_speed_reduction, dp_stop_distance, dp_extensions_enabled=dp_enabled,
+                                   dp_curve_lookahead_seconds=dp_curve_lookahead_seconds)
       longitudinal_planner.publish(sm, pm)
 
       ldw.update(sm.frame, sm['modelV2'], sm['carState'], sm['carControl'])

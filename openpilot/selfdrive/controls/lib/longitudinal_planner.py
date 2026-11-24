@@ -47,7 +47,8 @@ class LongitudinalPlanner:
     self.a_desired_trajectory = np.zeros(CONTROL_N)
     self.j_desired_trajectory = np.zeros(CONTROL_N)
 
-  def update(self, sm, dp_flags=0, dp_curve_speed_reduction=0, dp_stop_distance=6.0, *, dp_extensions_enabled=False):
+  def update(self, sm, dp_flags=0, dp_curve_speed_reduction=0, dp_stop_distance=6.0, *, dp_extensions_enabled=False,
+             dp_curve_lookahead_seconds=6):
     # Persisted DP settings never change Autospeed unless explicitly opted in.
     if dp_extensions_enabled and self.CP.openpilotLongitudinalControl:
       if self.dp_extensions is None:
@@ -130,7 +131,8 @@ class LongitudinalPlanner:
     self.output_should_stop = any(should_stop for _, _, should_stop in candidates)
     if self.dp_extensions is not None:
       output_a_target = self.dp_extensions.curve_accel(
-        sm, dp_curve_speed_reduction, v_cruise, reset_state, output_a_target, self.output_a_target)
+        sm, dp_curve_speed_reduction, v_cruise, reset_state, output_a_target, self.output_a_target,
+        lookahead_time=float(np.clip(dp_curve_lookahead_seconds, 1, 10)))
     self.output_a_target = np.clip(output_a_target, ACCEL_MIN, ACCEL_MAX)
 
     self.v_desired_filter.x = self.v_desired_filter.x + self.dt * (self.output_a_target + a_prev) / 2.0

@@ -181,4 +181,5 @@ inline static std::unordered_map<std::string, ParamKeyAttributes> keys = {
     {"dp_ui_rainbow", {PERSISTENT, BOOL, "0"}},
     {"dp_recording_policy", {PERSISTENT, JSON}},
     {"dp_lon_extensions_enabled", {PERSISTENT, BOOL, "0"}},
+    {"dp_lon_curve_lookahead_seconds", {PERSISTENT, INT, "6"}},
 };

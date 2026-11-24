@@ -4,7 +4,7 @@ from dataclasses import dataclass
 import numpy as np
 
 from openpilot.cereal import log
-from openpilot.common.constants import CV
+from openpilot.common.constants import ACCELERATION_DUE_TO_GRAVITY, CV
 from openpilot.common.realtime import DT_MDL
 
 
@@ -251,9 +251,19 @@ class CurveSpeedLimiter:
 
   @classmethod
   def _spatial_curvatures(cls, rate_plan: np.ndarray, velocity_plan: np.ndarray,
-                          position_x: np.ndarray, position_y: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
+                          position_x: np.ndarray, position_y: np.ndarray,
+                          roll: float = 0.0, allowed_lateral_accel: float = DEFAULT_MAX_LATERAL_ACCEL) -> tuple[np.ndarray, np.ndarray]:
     distances = cls._distances(position_x, position_y)
     curvatures = cls._curvatures(rate_plan, velocity_plan)
+
+    # Upstream predicts tire lateral acceleration as v*yaw_rate - g*roll.
+    # Solve the same budget for curve speed, rather than trusting the model's
+    # predicted speed (it may already be braking). Keep signed turn direction
+    # until after bank compensation. This is equivalent to
+    # v_limit^2 = (allowed_lateral_accel + sign(curvature)*g*roll) / abs(curvature).
+    if math.isfinite(roll) and roll != 0.0:
+      bank_budget = allowed_lateral_accel + np.sign(rate_plan) * ACCELERATION_DUE_TO_GRAVITY * roll
+      curvatures *= allowed_lateral_accel / np.maximum(bank_budget, 1e-3)
 
     # np.interp requires increasing x values. Predicted stops can leave repeated
     # trajectory positions near the end, which contain no useful curve distance.
@@ -515,7 +525,7 @@ class CurveSpeedLimiter:
 
   def update(self, model, v_ego: float, v_cruise: float,
              strength: int, enabled: bool, overriding: bool,
-             previous_accel: float = 0.0) -> CurveSpeedLimit:
+             previous_accel: float = 0.0, *, roll: float = 0.0, lookahead_time: float | None = None) -> CurveSpeedLimit:
     strength = int(np.clip(strength, 0, 100))
     lane_change_state = getattr(getattr(model, "meta", None), "laneChangeState", log.LaneChangeState.off)
     lane_changing = lane_change_state in (log.LaneChangeState.laneChangeStarting,
@@ -541,6 +551,16 @@ class CurveSpeedLimiter:
     if not valid_plan or not valid_speeds or v_ego <= MIN_CURVE_SPEED or v_cruise <= MIN_CURVE_SPEED:
       return self._reset()
 
+    horizon = np.ones(plan_length, dtype=bool)
+    if lookahead_time is not None:
+      times = np.asarray(getattr(model.position, 't', []), dtype=float)
+      if (not math.isfinite(lookahead_time) or lookahead_time <= 0.0 or len(times) != plan_length or
+          not np.all(np.isfinite(times)) or not np.all(np.diff(times) > 0.0)):
+        return self._reset()
+      horizon = (times >= 0.0) & (times <= lookahead_time)
+      if np.count_nonzero(horizon) < 2:
+        return self._reset()
+
     road_turn = False
     turn_angle = 0.0
     if lane_changing:
@@ -560,8 +580,10 @@ class CurveSpeedLimiter:
     self.lane_change_holding = False
     self.ego_distance += v_ego * DT_MDL
     self.allowed_lateral_accel = self._allowed_lateral_accel(strength)
+    # Keep the full prediction for S-shaped lane-change rejection above; only
+    # curve candidates are restricted to the configured prediction time.
     distances, curvatures = self._spatial_curvatures(
-      rate_plan, velocity_plan, position_x, position_y,
+      rate_plan[horizon], velocity_plan[horizon], position_x[horizon], position_y[horizon], roll, self.allowed_lateral_accel,
     )
     candidates = self._curve_candidates(distances, curvatures, v_ego, v_cruise, previous_accel)
     limiting_candidates = [
