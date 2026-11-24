@@ -36,10 +36,13 @@ class TestDeleter(UploaderTestCase):
 
   def assertDeleteOrder(self, f_paths: Sequence[Path]) -> None:
     deleted_order = []
-    for _ in f_paths:
-      out_of_space, deleted_path = deleter.deleter_step()
-      assert out_of_space and deleted_path is not None
-      deleted_order.append(next(f for f in f_paths if f.parent == Path(deleted_path)))
+    # The ordering cases have no active recordings. Exercise real descriptor
+    # inspection separately so unrelated host processes cannot affect this test.
+    with patch('openpilot.system.loggerd.deleter.open_recording_directories', return_value=set()):
+      for _ in f_paths:
+        out_of_space, deleted_path = deleter.deleter_step(recover_locks=False)
+        assert out_of_space and deleted_path is not None
+        deleted_order.append(next(f for f in f_paths if f.parent == Path(deleted_path)))
 
     assert deleted_order == f_paths, "Files not deleted in expected order"
 
