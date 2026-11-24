@@ -21,8 +21,7 @@ def main():
   longitudinal_planner = LongitudinalPlanner(CP)
   pm = messaging.PubMaster(['longitudinalPlan', 'driverAssistance'])
   sm = messaging.SubMaster(['carControl', 'carState', 'controlsState', 'radarState', 'modelV2', 'selfdriveState', 'vehicleParameters'],
-                           poll='modelV2', ignore_alive=['vehicleParameters'], ignore_avg_freq=['vehicleParameters'],
-                           ignore_valid=['vehicleParameters'])
+                           poll='modelV2')
 
   def read_dp_options():
     flags = 0
