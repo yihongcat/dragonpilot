@@ -1,6 +1,6 @@
-import io
 import socket
 import time
+from tempfile import NamedTemporaryFile
 
 import raylib_nb as rl
 import qrcode
@@ -48,18 +48,17 @@ class DashyQR:
       qr.make(fit=True)
 
       pil_img = qr.make_image(fill_color="white", back_color="black").convert('RGBA')
-      with io.BytesIO() as png:
+      with NamedTemporaryFile(suffix='.png') as png:
         pil_img.save(png, format='PNG')
-        image_data = png.getvalue()
-
-      if self._qr_texture and self._qr_texture.id != 0:
-        rl.unload_texture(self._qr_texture)
-
-      image = rl.load_image_from_memory('.png', image_data, len(image_data))
+        png.flush()
+        image = rl.load_image(png.name)
       try:
-        self._qr_texture = rl.load_texture_from_image(image)
+        texture = rl.load_texture_from_image(image)
       finally:
         rl.unload_image(image)
+      if self._qr_texture and self._qr_texture.id != 0:
+        rl.unload_texture(self._qr_texture)
+      self._qr_texture = texture
       self._last_qr_url = url
     except Exception as e:
       cloudlog.warning(f"QR code generation failed: {e}")

@@ -83,8 +83,12 @@ run_native_bootstrap() {
   fi
 
   stage "Gate 1: native messaging and MPC bootstrap"
+  local extension_suffix
+  extension_suffix="$(uv run --python 3.12 --extra tools python -c 'import sysconfig; print(sysconfig.get_config_var("EXT_SUFFIX"))')"
   uv run --python 3.12 --extra tools scons -j4 \
     openpilot/common/libparams_c.so \
+    "msgq_repo/msgq/_ipc${extension_suffix}" \
+    "msgq_repo/msgq/visionipc/_visionipc${extension_suffix}" \
     openpilot/selfdrive/controls/lib/longitudinal_mpc_lib/c_generated_code/acados_ocp_solver_pyx.so
 }
 
