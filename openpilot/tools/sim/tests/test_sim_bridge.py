@@ -4,6 +4,7 @@ import time
 import unittest
 
 from multiprocessing import Queue
+from queue import Empty
 
 from openpilot.common.test import OpenpilotTestCase
 from openpilot.cereal import messaging
@@ -74,23 +75,30 @@ class TestSimBridgeBase(OpenpilotTestCase):
 
     assert min_counts_control_active == control_active, f"Simulator did not engage a minimal of {min_counts_control_active} steps was {control_active}"
 
-    failure_states = []
     max_speed = 0.0
     max_commanded_accel = float('-inf')
-    while bridge.started.value:
+    finish_deadline = time.monotonic() + 240
+    while bridge.started.value and time.monotonic() < finish_deadline:
       sm.update(100)
       max_speed = max(max_speed, sm['carState'].vEgo)
       max_commanded_accel = max(max_commanded_accel, sm['carControl'].actuators.accel)
+    assert not bridge.started.value, "Simulator exceeded the wall-clock limit"
 
-    while not q.empty():
-      state = q.get()
+    done_info = None
+    result_deadline = time.monotonic() + 2.0
+    while time.monotonic() < result_deadline:
+      try:
+        state = q.get(timeout=max(0.0, result_deadline - time.monotonic()))
+      except Empty:
+        break
       if state.type == QueueMessageType.TERMINATION_INFO:
         done_info = state.info
-        failure_states = [done_state for done_state in done_info if done_state != "timeout" and done_info[done_state]]
         break
+    assert done_info is not None, "Simulator exited without a result"
+    failure_states = [state for state, failed in done_info.items() if state != "timeout" and failed]
     assert len(failure_states) == 0, (
-      f"Simulator failed: {failure_states}; peak speed {max_speed:.2f} m/s, peak acceleration command "
-      f"{max_commanded_accel:.2f} m/s², final target {sm['longitudinalPlan'].aTarget:.2f} m/s², "
+      f"Simulator failed: {failure_states}; peak speed {max_speed:.2f} m/s, peak acceleration command " +
+      f"{max_commanded_accel:.2f} m/s², final target {sm['longitudinalPlan'].aTarget:.2f} m/s², " +
       f"model target {sm['modelV2'].action.desiredAcceleration:.2f} m/s²"
     )
 

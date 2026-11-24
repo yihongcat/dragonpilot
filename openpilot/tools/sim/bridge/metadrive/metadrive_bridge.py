@@ -1,4 +1,5 @@
 import math
+import os
 from multiprocessing import Queue
 
 from metadrive.component.sensors.base_camera import _cuda_enable
@@ -58,22 +59,27 @@ class MetaDriveBridge(SimulatorBridge):
     self.test_duration = test_duration if self.test_run else math.inf
 
   def spawn_world(self, queue: Queue):
+    cpu_only = os.getenv("DP_CPU_ONLY_SIMULATION") == "1"
+    # Keep the camera geometry but rasterize fewer pixels in software.
+    render_scale = 2 if cpu_only and not self.high_quality else 1
+    camera_width, camera_height = W // render_scale, H // render_scale
     sensors = {
-      "rgb_road": (RGBCameraRoad, W, H, )
+      "rgb_road": (RGBCameraRoad, camera_width, camera_height),
     }
 
     if self.dual_camera:
-      sensors["rgb_wide"] = (RGBCameraWide, W, H)
+      sensors["rgb_wide"] = (RGBCameraWide, camera_width, camera_height)
 
     config = {
       "use_render": self.should_render,
+      "low_cost_rendering": render_scale > 1,
       "vehicle_config": {
         "enable_reverse": False,
         "render_vehicle": False,
         "image_source": "rgb_road",
       },
       "sensors": sensors,
-      "image_on_cuda": _cuda_enable,
+      "image_on_cuda": _cuda_enable and not cpu_only,
       "image_observation": True,
       "interface_panel": [],
       "out_of_route_done": False,

@@ -1,9 +1,8 @@
 import math
-import time
 import numpy as np
 
 from collections import namedtuple
-from panda3d.core import Vec3
+from panda3d.core import Vec3, loadPrcFileData
 from multiprocessing.connection import Connection
 
 from metadrive.engine.core.engine_core import EngineCore
@@ -21,7 +20,7 @@ C3_HPR = Vec3(0, 0,0)
 
 
 metadrive_simulation_state = namedtuple("metadrive_simulation_state", ["running", "done", "done_info"])
-metadrive_vehicle_state = namedtuple("metadrive_vehicle_state", ["velocity", "position", "bearing", "steering_angle"])
+metadrive_vehicle_state = namedtuple("metadrive_vehicle_state", ["velocity", "position", "bearing", "steering_angle", "simulation_time"])
 
 def apply_metadrive_patches(arrive_dest_done=True):
   # By default, metadrive won't try to use cuda images unless it's used as a sensor for vehicles, so patch that in
@@ -48,10 +47,29 @@ def apply_metadrive_patches(arrive_dest_done=True):
   if not arrive_dest_done:
     MetaDriveEnv._is_arrive_destination = arrive_destination_patch
 
+
+def configure_cpu_rendering():
+  from direct.filter.FilterManager import FilterManager
+  from metadrive.component.sensors import rgb_camera
+
+  class SoftwareCameraFilter(FilterManager):
+    def render_scene_into(self, *args, fbprops=None, **kwargs):
+      if fbprops is not None:
+        fbprops.set_multisamples(0)
+      return super().render_scene_into(*args, fbprops=fbprops, **kwargs)
+
+  # MetaDrive's RGB camera sets 16 samples on its own offscreen buffer.
+  # Disabling multisampling on the main window alone does not affect it.
+  rgb_camera.FilterManager = SoftwareCameraFilter
+  loadPrcFileData("", "framebuffer-multisample 0\nmultisamples 0\nsync-video 0")
+
+
 def metadrive_process(dual_camera: bool, config: dict, camera_array, wide_camera_array, image_lock,
                       controls_recv: Connection, simulation_state_send: Connection, vehicle_state_send: Connection,
                       exit_event, op_engaged, test_duration, test_run):
   arrive_dest_done = config.pop("arrive_dest_done", True)
+  if config.pop("low_cost_rendering", False):
+    configure_cpu_rendering()
   apply_metadrive_patches(arrive_dest_done)
 
   road_image = np.frombuffer(camera_array.get_obj(), dtype=np.uint8).reshape((H, W, 3))
@@ -81,6 +99,8 @@ def metadrive_process(dual_camera: bool, config: dict, camera_array, wide_camera
     return lane_idx_prev
 
   lane_idx_prev = reset()
+  simulation_step = 0
+  step_duration = config["physics_world_step_size"] * config["decision_repeat"]
   start_time = None
 
   def get_cam_as_rgb(cam):
@@ -93,6 +113,12 @@ def metadrive_process(dual_camera: bool, config: dict, camera_array, wide_camera
       img = img.get() # convert cupy array to numpy
     return img
 
+  def copy_camera_frame(name, output):
+    img = get_cam_as_rgb(name)
+    height, width = img.shape[:2]
+    # Consumers still receive the native buffer size and field of view.
+    output.reshape(height, H // height, width, W // width, 3)[:] = img[:, None, :, None, :]
+
   rk = Ratekeeper(100, None)
 
   steer_ratio = 8
@@ -103,7 +129,8 @@ def metadrive_process(dual_camera: bool, config: dict, camera_array, wide_camera
       velocity=vec3(x=float(env.vehicle.velocity[0]), y=float(env.vehicle.velocity[1]), z=0),
       position=env.vehicle.position,
       bearing=float(math.degrees(env.vehicle.heading_theta)),
-      steering_angle=env.vehicle.steering * env.vehicle.MAX_STEERING
+      steering_angle=env.vehicle.steering * env.vehicle.MAX_STEERING,
+      simulation_time=simulation_step * step_duration,
     )
     vehicle_state_send.send(vehicle_state)
 
@@ -122,11 +149,12 @@ def metadrive_process(dual_camera: bool, config: dict, camera_array, wide_camera
 
     is_engaged = op_engaged.is_set()
     if is_engaged and start_time is None:
-      start_time = time.monotonic()
+      start_time = simulation_step * step_duration
 
     if rk.frame % 5 == 0:
       _, _, terminated, _, _ = env.step(vc)
-      timeout = True if start_time is not None and time.monotonic() - start_time >= test_duration else False
+      simulation_step += 1
+      timeout = start_time is not None and simulation_step * step_duration - start_time >= test_duration
       lane_idx_curr, on_lane = get_current_lane_info(env.vehicle)
       out_of_lane = lane_idx_curr != lane_idx_prev or not on_lane
       lane_idx_prev = lane_idx_curr
@@ -147,8 +175,8 @@ def metadrive_process(dual_camera: bool, config: dict, camera_array, wide_camera
         simulation_state_send.send(simulation_state)
 
       if dual_camera:
-        wide_road_image[...] = get_cam_as_rgb("rgb_wide")
-      road_image[...] = get_cam_as_rgb("rgb_road")
+        copy_camera_frame("rgb_wide", wide_road_image)
+      copy_camera_frame("rgb_road", road_image)
       image_lock.release()
 
     rk.keep_time()

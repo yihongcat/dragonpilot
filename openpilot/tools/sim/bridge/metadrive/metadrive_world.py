@@ -1,5 +1,6 @@
 import ctypes
 import functools
+import math
 import multiprocessing
 import numpy as np
 import time
@@ -33,9 +34,9 @@ class MetaDriveWorld(World):
 
     self.test_run = test_run
 
-    self.first_engage = None
-    self.last_check_timestamp = 0
-    self.distance_moved = 0
+    self.engaged_at: float | None = None
+    self.engage_position: tuple[float, float] | None = None
+    self.vehicle_moved = False
 
     self.metadrive_process = multiprocessing.Process(name="metadrive process", target=
                               functools.partial(metadrive_process, dual_camera, config,
@@ -50,7 +51,7 @@ class MetaDriveWorld(World):
     print("---- Spawning Metadrive world, this might take awhile ----")
     print("----------------------------------------------------------")
 
-    self.vehicle_last_pos = self.vehicle_state_recv.recv().position # wait for a state message to ensure metadrive is launched
+    self.vehicle_state_recv.recv()  # Wait for MetaDrive to send its first state.
     self.status_q.put(QueueMessage(QueueMessageType.START_STATUS, "started"))
 
     self.steer_ratio = 15
@@ -91,31 +92,18 @@ class MetaDriveWorld(World):
       state.gps.from_xy(curr_pos)
       state.valid = True
 
-      is_engaged = state.is_engaged
-      if is_engaged and self.first_engage is None:
-        self.first_engage = time.monotonic()
+      if state.is_engaged and self.engaged_at is None:
+        self.engaged_at = md_vehicle.simulation_time
+        self.engage_position = tuple(curr_pos)
         self.op_engaged.set()
 
-      # check moving 5 seconds after engaged, doesn't move right away
-      after_engaged_check = is_engaged and self.first_engage is not None and time.monotonic() - self.first_engage >= 5 and self.test_run
-
-      x_dist = abs(curr_pos[0] - self.vehicle_last_pos[0])
-      y_dist = abs(curr_pos[1] - self.vehicle_last_pos[1])
-      dist_threshold = 1
-      if x_dist >= dist_threshold or y_dist >= dist_threshold: # position not the same during staying still, > threshold is considered moving
-        self.distance_moved += x_dist + y_dist
-
-      time_check_threshold = 29
-      current_time = time.monotonic()
-      since_last_check = current_time - self.last_check_timestamp
-      if since_last_check >= time_check_threshold:
-        if after_engaged_check and self.distance_moved == 0:
+      # Rendering can run slower than real time. Give the car the same amount
+      # of physics time to move regardless of the host's rendering speed.
+      if self.test_run and self.engaged_at is not None and self.engage_position is not None:
+        self.vehicle_moved |= math.dist(curr_pos, self.engage_position) >= 1.0
+        if md_vehicle.simulation_time - self.engaged_at >= 29.0 and not self.vehicle_moved:
           self.status_q.put(QueueMessage(QueueMessageType.TERMINATION_INFO, {"vehicle_not_moving" : True}))
           self.exit_event.set()
-
-        self.last_check_timestamp = current_time
-        self.distance_moved = 0
-        self.vehicle_last_pos = curr_pos
 
   def read_cameras(self):
     pass
