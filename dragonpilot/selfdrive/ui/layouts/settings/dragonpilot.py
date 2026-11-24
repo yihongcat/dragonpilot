@@ -21,7 +21,7 @@ from openpilot.system.ui.widgets import Widget, DialogResult
 from openpilot.selfdrive.ui.ui_state import ui_state
 from openpilot.system.ui.widgets.scroller_tici import Scroller
 from dragonpilot.system.ui.lib.multilang import tr
-from openpilot.system.ui.widgets.list_view import toggle_item, simple_item, button_item, spin_button_item, double_spin_button_item, text_spin_button_item
+from openpilot.system.ui.widgets.list_view import ListItem, toggle_item, button_item, spin_button_item, double_spin_button_item, text_spin_button_item
 from openpilot.system.ui.lib.application import gui_app
 from openpilot.system.ui.widgets.confirm_dialog import ConfirmDialog
 from openpilot.common.hardware import HARDWARE
@@ -73,7 +73,7 @@ class DragonpilotLayout(Widget):
         continue
 
       title_key = f"title_{i}"
-      self._toggles[title_key] = simple_item(title=f"### {section['title']} ###")
+      self._toggles[title_key] = ListItem(title=f"### {section['title']} ###")
       count_after_title = len(self._toggles)
 
       for setting in section.get("settings", []):
