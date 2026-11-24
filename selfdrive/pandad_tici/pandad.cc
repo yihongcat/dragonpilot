@@ -99,9 +99,7 @@ void can_send_thread(std::vector<Panda *> pandas, bool fake_send) {
     // Don't send if older than 1 second
     if ((nanos_since_boot() - event.getLogMonoTime() < 1e9) && !fake_send) {
       for (const auto& panda : pandas) {
-        LOGT("sending sendcan to panda: %s", (panda->hw_serial()).c_str());
         panda->can_send(event.getSendcan());
-        LOGT("sendcan sent to panda: %s", (panda->hw_serial()).c_str());
       }
     } else {
       LOGE("sendcan too old to send: %" PRIu64 ", %" PRIu64, nanos_since_boot(), event.getLogMonoTime());
