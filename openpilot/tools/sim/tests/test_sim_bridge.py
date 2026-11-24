@@ -9,6 +9,7 @@ from queue import Empty
 from openpilot.common.test import OpenpilotTestCase
 from openpilot.cereal import messaging
 from openpilot.common.basedir import BASEDIR
+from openpilot.common.params import Params
 from openpilot.tools.sim.bridge.common import QueueMessageType
 
 SIM_DIR = os.path.join(BASEDIR, "openpilot/tools/sim")
@@ -23,13 +24,20 @@ class TestSimBridgeBase(OpenpilotTestCase):
     self.processes = []
 
   def test_driving(self):
+    self.run_driving()
+
+  def run_driving(self, *, expect_no_driver_camera=False):
+    health_services = ['selfdriveState', 'onroadEvents', 'managerState', 'carState']
+    services = health_services + ['carParams', 'carControl', 'longitudinalPlan', 'modelV2']
+    if expect_no_driver_camera:
+      services += ['narrowRoadCameraState', 'wideRoadCameraState', 'cabinCameraState', 'driverMonitoringState']
+    sm = messaging.SubMaster(services, poll='selfdriveState')
+    params = Params()
+
     # Startup manager and bridge.py. Check processes are running, then engage and verify.
     p_manager = subprocess.Popen("./launch_openpilot.sh", cwd=SIM_DIR)
     self.processes.append(p_manager)
 
-    sm = messaging.SubMaster(['selfdriveState', 'onroadEvents', 'managerState', 'carState', 'carControl',
-                              'longitudinalPlan', 'modelV2'])
-    health_services = ['selfdriveState', 'onroadEvents', 'managerState']
     q = Queue()
     bridge = self.create_bridge()
     p_bridge = bridge.run(q, retries=10)
@@ -41,7 +49,7 @@ class TestSimBridgeBase(OpenpilotTestCase):
     start_waiting = time.monotonic()
     while not bridge.started.value and time.monotonic() < start_waiting + max_time_per_step:
       time.sleep(0.1)
-    assert p_bridge.exitcode is None, f"Bridge process should be running, but exited with code {p_bridge.exitcode}"
+    assert bridge.started.value and p_bridge.exitcode is None, f"Bridge did not start (exit code {p_bridge.exitcode})"
 
     start_time = time.monotonic()
     no_car_events_issues_once = False
@@ -53,7 +61,8 @@ class TestSimBridgeBase(OpenpilotTestCase):
       not_running = [p.name for p in sm['managerState'].processes if not p.running and p.shouldBeRunning]
       car_event_issues = [event.name for event in sm['onroadEvents'] if any([event.noEntry, event.softDisable, event.immediateDisable])]
 
-      if sm.all_alive(health_services) and len(car_event_issues) == 0 and len(not_running) == 0:
+      camera_ready = not expect_no_driver_camera or params.get('DriverCameraPresent') is False
+      if camera_ready and sm.all_alive(health_services) and sm.seen['carParams'] and not car_event_issues and not not_running:
         no_car_events_issues_once = True
         break
 
@@ -67,13 +76,20 @@ class TestSimBridgeBase(OpenpilotTestCase):
     while time.monotonic() < start_time + max_time_per_step:
       sm.update()
 
-      if sm.all_alive(health_services) and sm['selfdriveState'].active:
-        control_active += 1
-
-        if control_active == min_counts_control_active:
-          break
+      if sm.updated['selfdriveState']:
+        control_active = control_active + 1 if sm.all_alive(health_services) and sm['selfdriveState'].active else 0
+      if control_active == min_counts_control_active:
+        break
 
     assert min_counts_control_active == control_active, f"Simulator did not engage a minimal of {min_counts_control_active} steps was {control_active}"
+
+    if expect_no_driver_camera:
+      assert params.get('DriverCameraPresent') is False
+      assert sm.seen['narrowRoadCameraState'] and sm.seen['wideRoadCameraState']
+      assert not sm.seen['cabinCameraState'] and not sm.seen['driverMonitoringState']
+      monitoring_processes = ('dmonitoringd', 'dmonitoringmodeld')
+      assert not any(p.shouldBeRunning or p.running for p in sm['managerState'].processes if p.name in monitoring_processes)
+      assert not any(event.name in ('cameraMalfunction', 'commIssue') for event in sm['onroadEvents'])
 
     max_speed = 0.0
     max_commanded_accel = float('-inf')

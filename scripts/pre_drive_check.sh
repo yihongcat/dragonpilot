@@ -129,7 +129,7 @@ run_sim() {
     --with "${METADRIVE_DEP}" \
     --with pytest \
     python -m pytest -q \
-      openpilot/tools/sim/tests/test_metadrive_bridge.py::TestMetaDriveBridge::test_driving
+      openpilot/tools/sim/tests/test_metadrive_bridge.py::TestMetaDriveBridge
 }
 
 case "${MODE}" in

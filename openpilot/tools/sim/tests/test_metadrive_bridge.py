@@ -10,13 +10,20 @@ try:
 except ModuleNotFoundError:
   MetaDriveBridge = None
 from openpilot.tools.sim.tests.test_sim_bridge import TestSimBridgeBase
+from openpilot.tools.sim.lib.simulated_sensors import SimulatedSensors
 
 @unittest.skipIf(MetaDriveBridge is None, "metadrive is not installed")
 class TestMetaDriveBridge(TestSimBridgeBase):
   def setup_method(self):
     super().openpilot_setup_method()
     self.test_duration = 30
+    self.dual_camera = False
 
   def create_bridge(self):
     assert MetaDriveBridge is not None
-    return MetaDriveBridge(False, False, self.test_duration, True)
+    return MetaDriveBridge(self.dual_camera, False, self.test_duration, True)
+
+  def test_driving_without_driver_camera(self, monkeypatch):
+    self.dual_camera = True
+    monkeypatch.setattr(SimulatedSensors, 'send_fake_driver_monitoring', lambda _: None)
+    self.run_driving(expect_no_driver_camera=True)
