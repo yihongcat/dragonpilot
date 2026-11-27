@@ -534,8 +534,8 @@ class BaseSpinBoxAction(ItemAction, ABC):
       display_text = self._get_display_text()
       color = ITEM_TEXT_VALUE_COLOR if is_enabled else ITEM_DESC_TEXT_COLOR
       gui_label(label_rect, display_text, font_size=ITEM_TEXT_FONT_SIZE, color=color,
-                font_weight=FontWeight.NORMAL, alignment=rl.GuiTextAlignment.TEXT_ALIGN_CENTER,
-                alignment_vertical=rl.GuiTextAlignmentVertical.TEXT_ALIGN_MIDDLE)
+                font_weight=FontWeight.NORMAL, alignment=TextAlignment.CENTER,
+                alignment_vertical=TextAlignmentVertical.MIDDLE)
 
     return False
 
